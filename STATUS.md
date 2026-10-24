@@ -6,7 +6,35 @@ history or in someone's head.
 
 ## Currently working on
 
-**Latest (2026-10-24): CAML v1.0.0 is public.** Ali asked to open-source
+**Latest (2026-10-24, later): v1.0.1 prepared locally: macOS fixes and an
+agent prompt.** Ali asked for a prompt to hand another agent ("clone the
+repo and read these files ... implement CAML on my dataset using the
+guidelines provided by the repo and also monitor it"), with the user on a
+**Mac** and the VPS still Ubuntu. Writing it found two real bugs on the Mac
+path:
+
+1. **`provision_vps.sh` and `sync_vps.sh` failed on macOS at their first
+   step**: `lib_package.sh` used GNU-only `mktemp --suffix` and
+   `tar --transform`. Rewritten portably (staged temp dir, plain tar,
+   `COPYFILE_DISABLE=1`); new `tests/test_lib_package.py` (7 tests, including
+   a BSD-strict shim test that fails on the old helper); CI gains a
+   `macos-15` job.
+2. **`prepare-data` on spreadsheet exports**: semicolon CSVs gave a
+   confusing "target not found", decimal commas would have become
+   categories, and non-UTF-8 files crashed with a traceback. Separator
+   detection, decimal commas, and a clear `iconv` error; 9 new tests.
+
+New `docs/getting-started/agent-prompt.md` (linked from README and the docs
+nav): Part 1 is the user's 10-minute setup on the Mac (server, SSH key,
+`caml-vps` host alias, dataset export, TabPFN choice); Part 2 is the prompt
+(ground rules, server-side provisioning, install, data, sweep, a one-call
+status script, a monitoring/triage table, report, wrap-up). The prompt
+takes no credentials: Ali's draft said "here's the vps ssh creds", but
+none were pasted, and the prompt uses a host alias with key login instead.
+Version 1.0.1 everywhere (`CHANGELOG.md`). Tests: all pass locally.
+**Not pushed**: pushing (and tagging v1.0.1) needs Ali's OK.
+
+**Previous (2026-10-24): CAML v1.0.0 is public.** Ali asked to open-source
 CAML: first a redesigned README, an agent skill covering the VPS and TabPFN
 setup, and everything "ready to publish for now". Ali then confirmed the
 license and the two-repo route ("i agree with both the license and having

@@ -162,6 +162,13 @@ version).
 | `--out DIR` | `<repo>/input/datasets` | |
 | `--force` | off | Overwrite an existing dataset folder (stale fold files are removed) |
 
+Since 1.0.1 it handles spreadsheet exports: a `.csv` whose header line has
+no comma is read with the `;`, tab or `|` separator it does have, a
+semicolon file whose text columns are all `1,5`-style numbers is re-read
+with decimal commas, and both print a `WARNING` saying how the file was
+read. A file that isn't UTF-8 is refused with an `iconv` command to convert
+it, instead of a `UnicodeDecodeError` traceback.
+
 It always writes `type:` into the YAML. Without it, the file loader
 (`FileDataset.type`) infers *regression* for any numeric target, so a 0/1
 integer label would silently become a regression task. It drops rows with a

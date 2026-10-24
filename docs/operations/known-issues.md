@@ -78,6 +78,8 @@ documented, not fixable from CAML without patching that framework) ·
 
 | Date | Item | Commit |
 |---|---|---|
+| 2026-10-24 | `provision_vps.sh`/`sync_vps.sh` failed on macOS (GNU-only `mktemp --suffix`, `tar --transform` in `lib_package.sh`). Portable rewrite; `tests/test_lib_package.py` includes a BSD-strict shim test, and CI runs it on macOS. | `v1.0.1` |
+| 2026-10-24 | `prepare-data` on spreadsheet exports: semicolon CSVs (confusing "target not found"), decimal commas (would become categories), non-UTF-8 files (traceback). Separator detection, decimal commas, a clear encoding error. | `v1.0.1` |
 | 2026-10-24 | KI-40 decided: CAML is **Apache-2.0** (Ali: "i agree with both the license and having two separate repos"). MIT, like AMLB, was the alternative. | `v1.0.0` |
 | 2026-10-24 | KI-47 decided: **two repos**. The public `A1i-Tabatabaei/CAML` starts from a fresh history at `v1.0.0`; the full development history (which held server details and personal notes that don't belong in public) stays in the private archive `A1i-Tabatabaei/CAML-private`. | `v1.0.0` |
 | 2026-10-24 | Local CSV datasets never loaded under pandas 3 (`dtypes[i]` → `dtypes.iloc[i]` in `datasets/file.py`). Verified by `tests/test_file_dataset_pipeline.py`. | this release |

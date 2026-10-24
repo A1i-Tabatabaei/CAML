@@ -35,6 +35,12 @@ ssh-copy-id root@HOST               # asks for the server's root password once
 ssh -o BatchMode=yes root@HOST true && echo "key login works"
 ```
 
+On a Mac, if `ssh-copy-id` is missing, append the key by hand:
+`cat ~/.ssh/id_ed25519.pub | ssh root@HOST 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'`.
+If the key has a passphrase, store it in the macOS keychain once
+(`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`), so an agent's
+non-interactive `ssh` works without a prompt.
+
 Never ask the user to type a password into the chat. The committed scripts
 expect key authentication. For non-standard access (another port, a jump
 host or a config alias), set `SSH="ssh -p 2222"` and `SCP="scp -P 2222"` in
@@ -46,7 +52,9 @@ enable root key login, or use the manual route below with `sudo`.
 
 ## Provisioning
 
-From a clone of the CAML repo on the user's machine:
+From a clone of the CAML repo on the user's machine (Linux, or macOS since
+1.0.1; before that the scripts used GNU-only `mktemp` and `tar` options and
+failed on a Mac):
 
 ```bash
 ssh root@HOST 'curl -sS -m 20 https://www.openml.org/api/v1/json/task/3913 | head -c 120; echo'

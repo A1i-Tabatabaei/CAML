@@ -624,6 +624,53 @@ which GitHub deprecated for actions. Bumped to `checkout@v7` and
 `setup-uv@v7`, both on Node 24. setup-uv moves no floating major tag after
 v7 (v8–v10 exist only as exact versions), so a later bump must pin one.
 
+## macOS as the operator machine (2026-10-24, v1.0.1)
+
+Found while writing an agent prompt for a Mac user. CAML's own runs stay on
+the Ubuntu server; three scripts run on the user's machine
+(`provision_vps.sh`, `sync_vps.sh`, and `lib_package.sh`, which both source).
+
+### `provision_vps.sh` / `sync_vps.sh` fail on a Mac at the first step
+
+**Where**: `scripts/lib_package.sh::caml_package_archive`, plus one
+`mktemp` call in each script.
+**Symptom** (expected on any Mac, by inspection, and reproduced on Linux
+with BSD-strict stand-ins for `mktemp` and `tar`): `mktemp: illegal option
+-- -` from `mktemp --suffix=.tar.gz`, and bsdtar rejecting
+`--transform 's,^,CAML/,'`. Every Mac run of the README's setup command
+stopped there, before anything reached the server.
+**Cause**: `--suffix` and `--transform` are GNU extensions. macOS ships BSD
+`mktemp` and libarchive's `bsdtar` (and `/bin/bash` 3.2). The scripts were
+only ever run from Linux.
+**Fix**: `mktemp -d "${TMPDIR:-/tmp}/caml-....XXXXXX"` (works with both),
+and the archive is built by extracting `git archive` (or the worktree file
+list) into a staged `CAML/` folder, writing `REVISION` there, and running a
+plain `tar czf -C <stage> CAML`. `COPYFILE_DISABLE=1` keeps macOS from
+adding `._*` AppleDouble files. Tests: `tests/test_lib_package.py`
+(archive layout, REVISION, worktree mode, a BSD-strict shim test that fails
+on the old helper, and a static check that the three scripts use no
+GNU-only options). CI runs it on `macos-15` with the stock `/bin/bash`.
+**Workaround for older clones**: provision from the server itself (the
+README's manual route); nothing then runs on the Mac but `ssh` and `scp`.
+
+### `prepare-data` on Excel/Numbers exports: semicolons and encodings
+
+**Where**: `src/caml/prepare.py::read_table`.
+**Symptom**: a `;`-separated CSV read as one column, so the target "wasn't
+found" and the hint suggested the whole header (`Did you mean: f1;f2;label?`).
+A Windows-1252 or Mac Roman export crashed with a `UnicodeDecodeError`
+traceback. (A UTF-8 BOM and CRLF line endings were already fine.)
+**Cause**: `pd.read_csv` with its defaults: comma separator, UTF-8.
+**Fix**: `detect_separator()` reads the header line: a comma wins if
+present, otherwise the most frequent of `;`, tab, `|`. In a semicolon file
+whose text columns all look like `1,5`, the file is re-read with
+`decimal=","`; otherwise those numbers would silently become categories.
+Both cases add a `WARNING` saying how the file was read. Non-UTF-8 input
+raises a `PrepareError` naming the `iconv` conversion. Encodings are not
+guessed: a wrong guess would silently corrupt labels. Tests:
+`tests/test_prepare.py` (separator detection, decimal commas, BOM+CRLF,
+Mac Roman).
+
 ## Framework-specific gotchas
 
 See each framework's own doc page (`frameworks/<name>.md`) for

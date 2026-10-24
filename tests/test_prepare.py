@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from caml.prepare import PrepareError, infer_task_type, prepare_dataset, sanitize_name
+from caml.prepare import PrepareError, detect_separator, infer_task_type, prepare_dataset, sanitize_name
 
 
 def _toy_frame(n=60, seed=0):
@@ -213,3 +213,54 @@ def test_boolean_target_warning(tmp_path):
     df.to_csv(src, index=False)
     res = prepare_dataset(src, "churned", tmp_path / "out", folds=2)
     assert res.task_type == "binary" and any("True/False" in w for w in res.warnings)
+
+
+# --- spreadsheet exports (Excel/Numbers, often from a Mac) ---------------------
+
+def _export(path, text, encoding="utf-8", bom=False):
+    data = text.encode(encoding)
+    path.write_bytes((b"\xef\xbb\xbf" if bom else b"") + data)
+    return path
+
+
+def _rows(n=40, sep=",", decimal="."):
+    lines = [sep.join(["size", "weight", "label"])]
+    for i in range(n):
+        size, weight = f"{i % 7}{decimal}5", f"{10 + i}{decimal}25"
+        lines.append(sep.join([size, weight, "yes" if i % 2 else "no"]))
+    return "\r\n".join(lines) + "\r\n"
+
+
+@pytest.mark.parametrize("header, expected", [
+    ("a,b,c", ","), ("a;b;c", ";"), ("a\tb\tc", "\t"), ("a|b|c", "|"), ("onlyone", ","),
+])
+def test_detect_separator(tmp_path, header, expected):
+    assert detect_separator(_export(tmp_path / "x.csv", header + "\n1\n")) == expected
+
+
+def test_semicolon_csv_with_decimal_commas(tmp_path):
+    src = _export(tmp_path / "eu.csv", _rows(sep=";", decimal=","), bom=True)
+    res = prepare_dataset(src, "label", tmp_path / "out", name="eu", folds=2)
+    assert res.task_type == "binary" and res.feature_columns == 2
+    assert any("decimal commas" in w for w in res.warnings)
+    train = pd.read_csv(tmp_path / "out" / "eu" / "eu_train_0.csv")
+    assert pd.api.types.is_float_dtype(train["size"]) and pd.api.types.is_float_dtype(train["weight"])
+
+
+def test_semicolon_csv_with_decimal_points(tmp_path):
+    src = _export(tmp_path / "semi.csv", _rows(sep=";"))
+    res = prepare_dataset(src, "label", tmp_path / "out", name="semi", folds=2)
+    assert any("semicolon-separated" in w for w in res.warnings)
+    assert not any("decimal commas" in w for w in res.warnings)
+
+
+def test_bom_and_crlf_need_no_note(tmp_path):
+    src = _export(tmp_path / "excel.csv", _rows(), bom=True)
+    res = prepare_dataset(src, "label", tmp_path / "out", name="excel", folds=2)
+    assert res.target == "label" and not res.warnings
+
+
+def test_non_utf8_csv_gets_a_clear_error(tmp_path):
+    src = _export(tmp_path / "legacy.csv", _rows().replace("label", "Ergebnis_\u00e4"), encoding="mac_roman")
+    with pytest.raises(PrepareError, match="isn't UTF-8.*iconv"):
+        prepare_dataset(src, "Ergebnis_\u00e4", tmp_path / "out", name="legacy", folds=2)

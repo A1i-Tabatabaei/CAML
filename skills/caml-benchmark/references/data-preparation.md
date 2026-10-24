@@ -3,7 +3,12 @@
 ## What the data should look like
 
 - **One table, one row per example**, with a header row. CSV, TSV or
-  Parquet. Export Excel to CSV first.
+  Parquet. Export Excel or Numbers sheets to CSV first, preferably as
+  **CSV UTF-8**. Since 1.0.1, `prepare-data` detects a `;`, tab or `|`
+  separator from the header line, reads decimal commas (`1,5`) in
+  semicolon files, and says so in a `WARNING` line. A file that isn't UTF-8
+  (an older "CSV (Comma delimited)" or Mac Roman export) is refused with
+  the `iconv` command that converts it.
 - **One target column.** Classification targets can be text (`yes`/`no`,
   `gold`/`silver`/`bronze`) or integers. Regression targets must be numeric.
 - **Leave the features raw.** Don't impute, scale, one-hot encode or select

@@ -14,6 +14,7 @@ nav:
       - Install the orchestrator: getting-started/install-orchestrator.md
       - VPS bootstrap: getting-started/vps-bootstrap.md
       - Benchmark your own data (agent skill): https://github.com/A1i-Tabatabaei/CAML/blob/main/skills/caml-benchmark/SKILL.md
+      - Prompt for an AI agent (from a Mac): getting-started/agent-prompt.md
   - Architecture:
       - Overview: architecture/overview.md
       - Framework plugin contract: architecture/framework-plugin-contract.md

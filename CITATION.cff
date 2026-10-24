@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Tabatabaei
     given-names: Ali
-version: 1.0.0
+version: 1.0.1
 date-released: 2026-10-24
 license: Apache-2.0
 repository-code: "https://github.com/A1i-Tabatabaei/CAML"

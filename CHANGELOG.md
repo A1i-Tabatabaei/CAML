@@ -5,7 +5,28 @@ All notable changes to CAML. The format follows
 [Semantic Versioning](https://semver.org/). The day-by-day engineering record
 is in [STATUS.md](STATUS.md) and [CLAUDE.md](CLAUDE.md).
 
-## [Unreleased]
+## [1.0.1] - 2026-10-24
+
+### Fixed
+
+- **`scripts/provision_vps.sh` and `scripts/sync_vps.sh` failed on macOS** at
+  their first step. The packaging helper (`scripts/lib_package.sh`) used
+  GNU-only `mktemp --suffix` and `tar --transform`, which macOS's BSD tools
+  don't have, so the README's setup command didn't work from a Mac. It now
+  stages the files in a temp directory instead, and runs on the stock
+  `/bin/bash` 3.2.
+- **`caml prepare-data` and spreadsheet exports**: a semicolon-separated CSV
+  (Excel's format in many locales) failed with a confusing "target not
+  found, did you mean f1;f2;label?", and a non-UTF-8 export crashed with a
+  `UnicodeDecodeError` traceback. The separator (`,` `;` tab `|`) is now
+  detected from the header line, decimal commas are read in semicolon files,
+  and a non-UTF-8 file gets an error with the `iconv` command that fixes it.
+
+### Added
+
+- `docs/getting-started/agent-prompt.md`: a prompt to hand an AI agent, so
+  it benchmarks your dataset on your VPS and monitors the run, from a Mac.
+- CI runs the packaging helper and `prepare-data` tests on macOS too.
 
 ### Changed
 
@@ -68,5 +89,5 @@ First public release, under the Apache License 2.0.
   theme, plus `AGENTS.md`, `CITATION.cff`, `CONTRIBUTING.md`, `SECURITY.md`
   and CI.
 
-[Unreleased]: https://github.com/A1i-Tabatabaei/CAML/compare/v1.0.0...HEAD
+[1.0.1]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.1
 [1.0.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.0

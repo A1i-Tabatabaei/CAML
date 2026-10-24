@@ -22,4 +22,17 @@ jobs:
       - name: Tests
         run: uv run pytest -q
       - name: Lint the modules added in 1.0
-        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py
+        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py tests/test_lib_package.py
+
+  operator-scripts-macos:
+    # provision_vps.sh and sync_vps.sh run on the user's own machine, often a
+    # Mac: the stock /bin/bash 3.2, BSD mktemp and bsdtar. They failed there
+    # until 2026-10-24 (GNU-only options).
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - name: Packaging helper and prepare-data on macOS
+        run: uv run pytest -q tests/test_lib_package.py tests/test_prepare.py

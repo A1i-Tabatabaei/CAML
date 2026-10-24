@@ -53,8 +53,10 @@ if [[ -n "$(git status --porcelain)" && "$INCLUDE_WORKTREE" != "1" ]]; then
 fi
 
 REMOTE_TMP="/tmp/caml-provision"
-ARCHIVE_LOCAL="$(mktemp --suffix=.tar.gz)"
-trap 'rm -f "$ARCHIVE_LOCAL"' EXIT
+# A temp directory, not `mktemp --suffix` (GNU-only; it broke this script on macOS).
+WORK_LOCAL="$(mktemp -d "${TMPDIR:-/tmp}/caml-provision.XXXXXX")"
+ARCHIVE_LOCAL="$WORK_LOCAL/caml.tar.gz"
+trap 'rm -rf "$WORK_LOCAL"' EXIT
 
 if [[ "$INCLUDE_WORKTREE" == "1" ]]; then
   echo "==> [1/3] packaging the live working tree (tracked + untracked, gitignore-excluded) and pushing to $TARGET"

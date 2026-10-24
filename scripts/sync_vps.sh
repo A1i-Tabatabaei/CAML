@@ -59,8 +59,10 @@ if [[ "$FORCE" != "1" ]]; then
   fi
 fi
 
-ARCHIVE_LOCAL="$(mktemp --suffix=.tar.gz)"
-trap 'rm -f "$ARCHIVE_LOCAL"' EXIT
+# A temp directory, not `mktemp --suffix` (GNU-only; it broke this script on macOS).
+WORK_LOCAL="$(mktemp -d "${TMPDIR:-/tmp}/caml-sync.XXXXXX")"
+ARCHIVE_LOCAL="$WORK_LOCAL/caml.tar.gz"
+trap 'rm -rf "$WORK_LOCAL"' EXIT
 source "$REPO_ROOT/scripts/lib_package.sh"
 caml_package_archive "$ARCHIVE_LOCAL" "$INCLUDE_WORKTREE"
 echo "==> packaged $([[ "$INCLUDE_WORKTREE" == 1 ]] && echo 'working tree' || echo 'HEAD') at $(git rev-parse --short HEAD)"

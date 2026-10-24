@@ -13,24 +13,29 @@
 #   A VPS checkout has no .git, so caml.resources.git_info reads this file
 #   to keep results.csv's `app_version` column traceable to an exact commit.
 #   Must be called from the repo root.
+#
+# Portable to macOS (bash 3.2, BSD mktemp, bsdtar) as well as Linux: it
+# stages the files in a temp directory and tars that, instead of GNU-only
+# `mktemp --suffix` and `tar --transform` (which broke every run from a Mac
+# until 2026-10-24). COPYFILE_DISABLE=1 stops macOS tar from adding `._*`
+# AppleDouble files.
 
 caml_package_archive() {
   local out="$1" include_worktree="${2:-0}"
-  local tar_tmp rev_dir dirty=0
-  tar_tmp="$(mktemp --suffix=.tar)"
-  rev_dir="$(mktemp -d)"
+  local stage dirty=0
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/caml-package.XXXXXX")"
+  mkdir "$stage/CAML"
 
   if [[ "$include_worktree" == "1" ]]; then
-    git ls-files -co --exclude-standard | tar cf "$tar_tmp" --transform 's,^,CAML/,' -T -
+    git ls-files -co --exclude-standard | COPYFILE_DISABLE=1 tar cf - -T - | tar xf - -C "$stage/CAML"
     [[ -n "$(git status --porcelain)" ]] && dirty=1
   else
-    git archive --format=tar --prefix=CAML/ HEAD > "$tar_tmp"
+    git archive --format=tar HEAD | tar xf - -C "$stage/CAML"
   fi
 
   printf 'commit=%s\nbranch=%s\ndirty=%s\n' \
-    "$(git rev-parse HEAD)" "$(git rev-parse --abbrev-ref HEAD)" "$dirty" > "$rev_dir/REVISION"
-  tar rf "$tar_tmp" -C "$rev_dir" --transform 's,^,CAML/,' REVISION
+    "$(git rev-parse HEAD)" "$(git rev-parse --abbrev-ref HEAD)" "$dirty" > "$stage/CAML/REVISION"
 
-  gzip -c "$tar_tmp" > "$out"
-  rm -rf "$tar_tmp" "$rev_dir"
+  COPYFILE_DISABLE=1 tar czf "$out" -C "$stage" CAML
+  rm -rf "$stage"
 }

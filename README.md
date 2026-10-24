@@ -89,7 +89,7 @@ A bundled <a href="skills/caml-benchmark/SKILL.md">agent skill</a> walks an AI a
 
 CAML runs on an Ubuntu 24.04 server. Framework installs are large (AutoGluon
 alone pulls about 170 packages), so use a VPS, not your laptop. From your
-own machine:
+own machine (Linux, or macOS from 1.0.1):
 
 ```bash
 git clone https://github.com/A1i-Tabatabaei/CAML.git && cd CAML
@@ -365,6 +365,13 @@ That installs it in Claude Code. For other agents, copy `skills/caml-benchmark/`
 into your agent's skills directory. Agents working inside this repo should
 also read [AGENTS.md](AGENTS.md).
 
+To hand the whole job to an agent, use the ready-made prompt in
+[docs/getting-started/agent-prompt.md](docs/getting-started/agent-prompt.md).
+It covers the 10 minutes of setup on your side (a server, an SSH key and a
+host alias, the dataset), then has the agent provision the VPS, prepare your
+data, run and monitor the sweep, and write the report. It's written for a
+Mac, and works the same from Linux.
+
 ## Command reference
 
 | Command | What it does |
@@ -421,7 +428,7 @@ repository"** button uses [CITATION.cff](CITATION.cff).
   author  = {Tabatabaei, Ali},
   title   = {{CAML}: Benchmarking open-source AutoML frameworks in isolated environments},
   year    = {2026},
-  version = {1.0.0},
+  version = {1.0.1},
   url     = {https://github.com/A1i-Tabatabaei/CAML},
   license = {Apache-2.0}
 }

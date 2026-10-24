@@ -40,6 +40,10 @@ SUPPORTED_SUFFIXES = (".csv", ".tsv", ".parquet", ".pq")
 # An integer-valued numeric target with at most this many distinct values is
 # treated as class labels (with a warning), above it as a regression target.
 MAX_INT_CLASSES = 10
+# Delimiters a .csv file may use. Excel writes ';' (with decimal commas) in
+# locales whose decimal mark is a comma; tab and '|' also turn up.
+CSV_SEPARATORS = (",", ";", "\t", "|")
+_SEPARATOR_NAMES = {",": "comma", ";": "semicolon", "\t": "tab", "|": "pipe"}
 
 
 class PrepareError(ValueError):
@@ -71,18 +75,60 @@ def sanitize_name(name: str) -> str:
     return cleaned
 
 
-def read_table(path: Path) -> pd.DataFrame:
+def detect_separator(path: Path) -> str:
+    """The delimiter of a .csv file, judged from its header line.
+
+    A comma wins whenever the header has one; otherwise the most frequent of
+    ';', tab and '|'. Without this, a semicolon file reads as one column and
+    the target "isn't found".
+    """
+    with open(path, encoding="utf-8-sig", errors="replace") as fh:
+        header = fh.readline()
+    if "," in header:
+        return ","
+    best = max(CSV_SEPARATORS[1:], key=header.count)
+    return best if header.count(best) else ","
+
+
+def _has_decimal_commas(df: pd.DataFrame) -> bool:
+    """True if some text column holds only numbers written like ``1,5``."""
+    for col in df.columns:
+        values = df[col].dropna()
+        if values.empty or pd.api.types.is_numeric_dtype(values):
+            continue
+        text = values.astype(str).str.strip()
+        if text.str.fullmatch(r"[+-]?\d+(,\d+)?").all() and text.str.contains(",", regex=False).any():
+            return True
+    return False
+
+
+def read_table(path: Path, notes: list[str] | None = None) -> pd.DataFrame:
+    """Read a CSV, TSV or Parquet file. How a CSV was parsed goes to ``notes``."""
     suffix = path.suffix.lower()
-    if suffix == ".csv":
-        return pd.read_csv(path)
-    if suffix == ".tsv":
-        return pd.read_csv(path, sep="\t")
     if suffix in (".parquet", ".pq"):
         return pd.read_parquet(path)
-    raise PrepareError(
-        f"Unsupported file type {suffix!r}. Use one of: {', '.join(SUPPORTED_SUFFIXES)} "
-        "(export spreadsheets to CSV first)."
-    )
+    if suffix not in (".csv", ".tsv"):
+        raise PrepareError(
+            f"Unsupported file type {suffix!r}. Use one of: {', '.join(SUPPORTED_SUFFIXES)} "
+            "(export spreadsheets to CSV first)."
+        )
+    sep = "\t" if suffix == ".tsv" else detect_separator(path)
+    try:
+        df = pd.read_csv(path, sep=sep)
+        if sep == ";" and _has_decimal_commas(df):
+            df = pd.read_csv(path, sep=sep, decimal=",")
+            note = "Read as semicolon-separated with decimal commas (1,5 means 1.5)."
+        else:
+            note = f"Read as {_SEPARATOR_NAMES[sep]}-separated." if suffix == ".csv" and sep != "," else None
+    except UnicodeDecodeError as exc:
+        raise PrepareError(
+            f"{path.name} isn't UTF-8 text. Re-export it as CSV UTF-8, or convert it, e.g. "
+            f"iconv -f WINDOWS-1252 -t UTF-8 {path.name} > utf8.csv "
+            "(use MACINTOSH instead of WINDOWS-1252 for files from old Mac software)."
+        ) from exc
+    if note and notes is not None:
+        notes.append(note)
+    return df
 
 
 def infer_task_type(y: pd.Series) -> tuple[str, str]:
@@ -187,7 +233,8 @@ def prepare_dataset(
     if dataset_dir.exists() and any(dataset_dir.iterdir()) and not force:
         raise PrepareError(f"{dataset_dir} already exists and is not empty; pass --force to overwrite it.")
 
-    df = read_table(source)
+    read_notes: list[str] = []
+    df = read_table(source, read_notes)
     if df.columns.duplicated().any():
         dupes = sorted(set(df.columns[df.columns.duplicated()].astype(str)))
         raise PrepareError(f"Duplicate column names: {', '.join(dupes)}. Rename them first.")
@@ -203,7 +250,7 @@ def prepare_dataset(
     if target in drop:
         raise PrepareError("The target column can't also be dropped.")
 
-    warnings: list[str] = []
+    warnings: list[str] = list(read_notes)
     df = df.drop(columns=list(drop))
     missing_target = df[target].isna()
     dropped_rows = int(missing_target.sum())

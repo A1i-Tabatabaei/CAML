@@ -6,7 +6,17 @@ keep it current as decisions are made or revised.
 
 ## Session handoff — read this first
 
-**Newest work (2026-10-24): CAML v1.0.0 is open source and public.** Ali:
+**Newest work (2026-10-24, later): v1.0.1 prepared locally, not pushed.**
+A Mac-oriented agent prompt (`docs/getting-started/agent-prompt.md`) for
+"implement CAML on my dataset ... and also monitor it", plus two bugs it
+exposed: the operator-side scripts (`provision_vps.sh`, `sync_vps.sh` via
+`lib_package.sh`) used GNU-only `mktemp --suffix`/`tar --transform` and
+failed on macOS; and `prepare-data` mishandled semicolon CSVs, decimal
+commas and non-UTF-8 exports. Both fixed with tests (CI now has a macOS
+job). Details: troubleshooting "macOS as the operator machine". **Next**:
+Ali approves pushing and tagging v1.0.1; then the paper plan when Ali says.
+
+**Earlier (2026-10-24): CAML v1.0.0 is open source and public.** Ali:
 "I need you to open-source it and make it public but before that I need
 you to update README file and create a visually appealing professional
 design of it ... also write a skill for AI agents ... make it ready to

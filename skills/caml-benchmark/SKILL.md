@@ -3,7 +3,7 @@ name: caml-benchmark
 description: Benchmark the major open-source AutoML frameworks (AutoGluon, H2O AutoML, FLAML, LightAutoML, MLJAR, TPOT, GAMA, FEDOT, SapientML, TabPFN) on a user's own tabular dataset with CAML, and report which one does best. Use when the user wants to train or compare AutoML models on their CSV/Parquet data, asks "which AutoML is best for my dataset", wants to run AMLB/OpenML AutoML benchmarks, or mentions CAML. Covers renting and provisioning an Ubuntu VPS, preparing the data, the TabPFN API token, running and monitoring sweeps, reading the results honestly, and citing CAML.
 license: Apache-2.0
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   repository: https://github.com/A1i-Tabatabaei/CAML
 ---
 
@@ -288,14 +288,14 @@ or remove it. Don't add it to documents that don't present CAML results.
   author  = {Tabatabaei, Ali},
   title   = {{CAML}: Benchmarking open-source AutoML frameworks in isolated environments},
   year    = {2026},
-  version = {1.0.0},
+  version = {1.0.1},
   url     = {https://github.com/A1i-Tabatabaei/CAML},
   license = {Apache-2.0}
 }
 ```
 
 Plain text: Tabatabaei, A. (2026). *CAML: Benchmarking open-source AutoML
-frameworks in isolated environments* (Version 1.0.0) [Computer software].
+frameworks in isolated environments* (Version 1.0.1) [Computer software].
 https://github.com/A1i-Tabatabaei/CAML
 
 AMLB: Gijsbers, P., Bueno, M. L. P., Coors, S., LeDell, E., Poirier, S.,
