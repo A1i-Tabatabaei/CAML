@@ -6,7 +6,40 @@ history or in someone's head.
 
 ## Currently working on
 
-**Latest (2026-10-24, later): v1.0.1 prepared locally: macOS fixes and an
+**Latest (2026-10-24, evening): v1.1.0, CAML driven from Windows, macOS or
+Linux by AI agents.** Ali: "update this new repository to support windows,
+mac, and linux ... optimize it for ai agents ... the agent should first
+determine what os it's running on and then choose the right scripts and
+commands ... (BUT ALL OF THEM SHOULD RUN CAML ON THE UBUNTU VPS)". Plus a
+field report in the prompts ("document and record any bugs/problems ... and
+their fix (plus gotchas) in detail in an md file"; a Mac user will send
+theirs, and Ali will run Windows and send one too), three copy-paste prompts
+in the README, then commit and push to both repos.
+
+- **`scripts/camlctl`**: one server command (`ssh caml-vps camlctl <plain
+  words>`) for every OS: setup, caml, install, dataset, script, detached
+  jobs (start/jobs/logs/wait/stop with exit codes), status, bundle,
+  tabpfn-token, info, update, version. 33 unit tests
+  (`tests/test_camlctl.py`, run as an ordinary user with a fake uv;
+  mutation-checked).
+- **Operator profiles** `skills/caml-benchmark/references/operator-{windows,macos,linux}.md`,
+  `camlctl.md` and `field-report.md`; SKILL.md rewritten around them (OS
+  detection in Phase 1, field report in Phase 9).
+- **Prompts**: `docs/getting-started/agent-prompt.md` (per-OS setup, three
+  prompts, field-report hand-off) and the same prompts in the README's
+  "For AI agents" (in `<details>` blocks with copy buttons). A "Field
+  report" issue template.
+- **Fixed**: CRLF from Windows clones (`git archive` applies
+  `core.autocrlf`, verified in a scratch repo); `.gitattributes` keeps LF.
+- **CI**: `server-e2e` (the whole agent flow as root over SSH on Ubuntu
+  24.04, with a Windows-1252 export through to a real FLAML sweep),
+  `operator-windows` (PowerShell 5.1 and 7), POSIX operator checks on macOS
+  and Linux, and shellcheck. `tests/test_agent_docs.py` lints every
+  documented `ssh` command for cross-shell safety.
+- New open items: KI-16 (camlctl on a real VPS), KI-17 (agent-driven runs
+  from Windows and macOS: the field reports).
+
+**Before that (2026-10-24, later): v1.0.1 prepared locally: macOS fixes and an
 agent prompt.** Ali asked for a prompt to hand another agent ("clone the
 repo and read these files ... implement CAML on my dataset using the
 guidelines provided by the repo and also monitor it"), with the user on a
@@ -32,7 +65,7 @@ status script, a monitoring/triage table, report, wrap-up). The prompt
 takes no credentials: Ali's draft said "here's the vps ssh creds", but
 none were pasted, and the prompt uses a host alias with key login instead.
 Version 1.0.1 everywhere (`CHANGELOG.md`). Tests: all pass locally.
-**Not pushed**: pushing (and tagging v1.0.1) needs Ali's OK.
+Pushed and tagged together with v1.1.0 (Ali: "commit and push to both private and public repos").
 
 **Previous (2026-10-24): CAML v1.0.0 is public.** Ali asked to open-source
 CAML: first a redesigned README, an agent skill covering the VPS and TabPFN

@@ -23,6 +23,8 @@
 #                  OR a git URL to clone          (default: $CAML_REPO_URL)
 #   CAML_REPO_URL  git URL used when CAML_SRC is unset
 #                                                 (default: the public-clone-friendly HTTPS URL below)
+#   CAML_REF       branch, tag or commit to check out after a git clone
+#                                                 (default: the repo's default branch)
 #   AMLB_REF_URL   AMLB reference clone URL       (default: openml/automlbenchmark)
 set -euo pipefail
 
@@ -60,6 +62,10 @@ elif [[ -f "$CAML_SRC" ]]; then
 else
   echo "    cloning: $CAML_SRC"
   git clone "$CAML_SRC" CAML
+  if [[ -n "${CAML_REF:-}" ]]; then
+    echo "    checking out: $CAML_REF"
+    git -C CAML checkout -q "$CAML_REF"
+  fi
 fi
 
 echo "==> [3/4] AMLB reference clone (read-only, attribution/diff only)"
@@ -76,4 +82,4 @@ uv run caml doctor
 
 echo
 echo "Workspace ready at $WORKSPACE_DIR/CAML."
-echo "Next: uv run caml install <framework>  &&  uv run caml run <framework> --benchmark test --constraint test"
+echo "Next (from your machine): ssh <host> camlctl install FLAML, then ssh <host> camlctl caml run FLAML --benchmark test --constraint test"

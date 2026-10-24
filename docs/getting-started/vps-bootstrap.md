@@ -3,7 +3,27 @@
 Target: a fresh Ubuntu 24.04 LTS server (CPU-only for now; GPU support is
 backlog, see `STATUS.md` Phase 8), with root/sudo SSH access.
 
-## Fastest path: one-shot provisioning
+## From any operator machine: `camlctl setup` (since 1.1.0)
+
+From Windows (PowerShell or Git Bash), macOS or Linux, with SSH key login to
+the box (an alias such as `caml-vps` in `~/.ssh/config`):
+
+```bash
+ssh caml-vps "command -v git || (apt-get update -qq && apt-get install -y -qq git)"
+ssh caml-vps "test -d /opt/caml-src || git clone -q https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src"
+ssh caml-vps bash /opt/caml-src/scripts/camlctl setup --detach
+ssh caml-vps camlctl wait setup 540
+```
+
+`camlctl setup` runs the same two scripts described below (bootstrap as
+root, then the workspace as `caml`), installs `/usr/local/bin/camlctl`, and
+creates `~caml/data`. From then on every server action is
+`ssh caml-vps camlctl ...`: see
+[the camlctl reference](https://github.com/A1i-Tabatabaei/CAML/blob/main/skills/caml-benchmark/references/camlctl.md)
+and the per-OS operator profiles next to it. This page's script route stays
+the developer's way to deploy a local, uncommitted checkout.
+
+## From a clone: one-shot provisioning
 
 From a checkout of this repo on your own machine (with working SSH to the
 box — key-based auth or an `~/.ssh/config` entry):

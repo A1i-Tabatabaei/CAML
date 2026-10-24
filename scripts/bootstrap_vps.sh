@@ -14,7 +14,7 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-echo "==> [1/5] apt baseline packages"
+echo "==> [1/6] apt baseline packages"
 apt-get update -yq
 apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
   build-essential curl ca-certificates git pkg-config \
@@ -23,13 +23,12 @@ apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--fo
   swig \
   unzip tmux htop
 
-echo "==> [2/5] uv (Python interpreter + venv/package manager, no apt/PPA involved)"
+echo "==> [2/6] uv (Python interpreter + venv/package manager, no apt/PPA involved)"
 CAML_USER="${CAML_USER:-caml}"
 if ! id -u "$CAML_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$CAML_USER"
   echo "Created non-root user '$CAML_USER'. All 'caml install'/'caml run' work should run as this user."
 fi
-CAML_HOME=$(getent passwd "$CAML_USER" | cut -d: -f6)
 
 if ! sudo -u "$CAML_USER" bash -lc 'command -v uv' >/dev/null 2>&1; then
   sudo -u "$CAML_USER" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
@@ -38,7 +37,7 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' /etc/profile.d/caml-uv-path.sh 
   echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/caml-uv-path.sh
 chmod 644 /etc/profile.d/caml-uv-path.sh
 
-echo "==> [3/5] swapfile (safety net for H2O's JVM / AutoGluon / torch-based frameworks)"
+echo "==> [3/6] swapfile (safety net for H2O's JVM / AutoGluon / torch-based frameworks)"
 total_mem_mb=$(free -m | awk '/^Mem:/{print $2}')
 if [[ ! -f /swapfile ]] && [[ "$total_mem_mb" -lt 8192 ]]; then
   fallocate -l 4G /swapfile
@@ -51,7 +50,7 @@ else
   echo "Swapfile already present or system has >=8GB RAM; skipping."
 fi
 
-echo "==> [4/5] passwordless sudo for apt-get, scoped to the caml user (installer.py's _ensure_apt_packages uses 'sudo -n apt-get install')"
+echo "==> [4/6] passwordless sudo for apt-get, scoped to the caml user (installer.py's _ensure_apt_packages uses 'sudo -n apt-get install')"
 SUDOERS_FILE="/etc/sudoers.d/caml-apt"
 if [[ ! -f "$SUDOERS_FILE" ]]; then
   echo "$CAML_USER ALL=(root) NOPASSWD: /usr/bin/apt-get install -y *" > "$SUDOERS_FILE"
@@ -59,7 +58,16 @@ if [[ ! -f "$SUDOERS_FILE" ]]; then
   visudo -c -f "$SUDOERS_FILE"
 fi
 
-echo "==> [5/5] sanity report"
+echo "==> [5/6] camlctl, the one quote-free command operators run over SSH (ssh HOST camlctl help)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/camlctl" ]]; then
+  install -m 0755 "$SCRIPT_DIR/camlctl" /usr/local/bin/camlctl
+  echo "Installed /usr/local/bin/camlctl."
+else
+  echo "camlctl not found next to this script; skipping (provision_vps.sh and camlctl setup both ship it)."
+fi
+
+echo "==> [6/6] sanity report"
 echo "--- versions ---"
 sudo -u "$CAML_USER" bash -lc 'uv --version' || true
 java -version
@@ -74,8 +82,5 @@ fi
 echo "--- resources ---"
 free -h
 df -h /
-echo "--- next steps ---"
-echo "1. su - $CAML_USER"
-echo "2. clone the CAML repo and the automlbenchmark-reference repo as siblings under ~$CAML_USER/ (see CLAUDE.md workspace layout)"
-echo "3. cd CAML && uv sync"
-echo "4. uv run caml doctor"
+echo "--- next step ---"
+echo "Set up the workspace as $CAML_USER: scripts/setup_workspace.sh (camlctl setup and provision_vps.sh run it for you)."

@@ -1,0 +1,831 @@
+#!/usr/bin/env bash
+# camlctl: drive CAML on its Ubuntu server with one quote-free command.
+#
+# Every operator machine (Windows, macOS or Linux) runs the same thing:
+#
+#     ssh caml-vps camlctl <command> [args]
+#
+# No nested quotes, no $VARIABLES, no multi-line strings. Those are what
+# broke whenever a command crossed PowerShell, zsh or bash, then ssh, then
+# `sudo -iu caml bash -lc '...'` (see the skill's references/vps.md and
+# docs/operations/troubleshooting.md). camlctl does the privilege drop to the
+# `caml` user, the repo directory, detached jobs, status reports, dataset
+# intake and result bundles itself. `camlctl help` lists the commands; the
+# full reference is skills/caml-benchmark/references/camlctl.md.
+#
+# Installed to /usr/local/bin by scripts/bootstrap_vps.sh and by
+# `camlctl setup`. Runs as root, and re-executes itself with `sudo -n` when
+# the SSH user is a passwordless sudoer instead (e.g. `ubuntu`).
+#
+# Test overrides (tests/test_camlctl.py runs it as an ordinary user):
+# CAMLCTL_ALLOW_NONROOT=1, CAMLCTL_USER, CAMLCTL_HOME, CAMLCTL_REPO,
+# CAMLCTL_DATA, CAMLCTL_STATE, CAMLCTL_BIN, CAMLCTL_BUNDLES.
+set -uo pipefail
+
+CAMLCTL_VERSION="1.1.0"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SELF_DIR="$(dirname "$SELF")"
+CAML_USER="${CAMLCTL_USER:-caml}"
+STATE_DIR="${CAMLCTL_STATE:-/var/lib/camlctl}"
+JOBS_DIR="$STATE_DIR/jobs"
+BIN_PATH="${CAMLCTL_BIN:-/usr/local/bin/camlctl}"
+JOB_NAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+FILE_NAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+
+die()  { echo "camlctl: $*" >&2; exit 1; }
+die2() { echo "camlctl: $*" >&2; exit 2; }   # usage error
+die3() { echo "camlctl: $*" >&2; exit 3; }   # conflict: something is running or already exists
+utc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+caml_home() {
+  if [[ -n "${CAMLCTL_HOME:-}" ]]; then echo "$CAMLCTL_HOME"; return; fi
+  local h; h="$(getent passwd "$CAML_USER" | cut -d: -f6)"
+  echo "${h:-/home/$CAML_USER}"
+}
+caml_group() { id -gn "$CAML_USER" 2>/dev/null || echo "$CAML_USER"; }
+refresh_paths() {
+  CAML_HOME="$(caml_home)"
+  REPO="${CAMLCTL_REPO:-$CAML_HOME/caml-workspace/CAML}"
+  DATA_DIR="${CAMLCTL_DATA:-$CAML_HOME/data}"
+}
+
+# Run "$@" in directory $1 as the caml user, with its login environment
+# (uv on PATH, TABPFN_TOKEN from ~/.profile). CAMLCTL_JOB rides along so
+# `camlctl stop` can find every process a job started.
+as_caml() {
+  local dir="$1"; shift
+  if [[ "$(id -un)" == "$CAML_USER" ]]; then
+    (cd "$dir" && CAMLCTL_JOB="${CAMLCTL_JOB:-}" "$@")
+  else
+    (cd / && sudo -u "$CAML_USER" -H -- env CAMLCTL_JOB="${CAMLCTL_JOB:-}" \
+      bash -lc 'cd "$1" && shift && exec "$@"' camlctl "$dir" "$@")
+  fi
+}
+
+require_user() { id -u "$CAML_USER" >/dev/null 2>&1 || die "there is no '$CAML_USER' user yet. Run: camlctl setup --detach"; }
+require_repo() {
+  require_user
+  [[ -f "$REPO/pyproject.toml" ]] || die "CAML isn't set up at $REPO yet. Run: camlctl setup --detach"
+}
+
+caml_version() { sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$REPO/src/caml/__version__.py" 2>/dev/null; }
+caml_revision() {
+  if [[ -d "$REPO/.git" ]]; then
+    as_caml "$REPO" git rev-parse --short HEAD 2>/dev/null
+  elif [[ -f "$REPO/REVISION" ]]; then
+    sed -n 's/^commit=\(.\{7\}\).*/\1/p' "$REPO/REVISION"
+  fi
+}
+
+# --- jobs ------------------------------------------------------------------
+# A job is one camlctl command run detached in its own session, so it
+# survives the SSH connection dropping. Its files live in $JOBS_DIR:
+# NAME.log, NAME.args (NUL-separated), NAME.cmd, NAME.started, NAME.pid,
+# and NAME.exit + NAME.ended once it finishes.
+
+valid_job_name() { [[ "$1" =~ $JOB_NAME_RE ]]; }
+
+job_alive() {
+  local name="$1" pid
+  pid="$(cat "$JOBS_DIR/$name.pid" 2>/dev/null)" || return 1
+  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/cmdline" ]] || return 1
+  # Guard against PID reuse: the process must still be this job's runner.
+  local -a argv=()
+  mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || return 1
+  local i
+  for ((i = 0; i + 1 < ${#argv[@]}; i++)); do
+    [[ "${argv[i]}" == "__job" && "${argv[i+1]}" == "$name" ]] && return 0
+  done
+  return 1
+}
+
+job_state() {
+  local name="$1"
+  if [[ ! -f "$JOBS_DIR/$name.started" ]]; then echo "unknown"
+  elif [[ -f "$JOBS_DIR/$name.exit" ]]; then
+    [[ "$(cat "$JOBS_DIR/$name.exit")" == "0" ]] && echo "done" || echo "failed"
+  elif job_alive "$name"; then echo "running"
+  elif [[ ! -f "$JOBS_DIR/$name.pid" ]] && (( $(date +%s) - $(stat -c %Y "$JOBS_DIR/$name.started") < 30 )); then
+    echo "starting"
+  else echo "lost"    # no exit code and no process: a reboot, or kill -9
+  fi
+}
+
+human_secs() {
+  local s="$1"
+  if (( s >= 3600 )); then printf '%dh%02dm' $((s / 3600)) $((s % 3600 / 60))
+  elif (( s >= 60 )); then printf '%dm%02ds' $((s / 60)) $((s % 60))
+  else printf '%ds' "$s"; fi
+}
+
+job_elapsed() {
+  local name="$1" start end
+  start="$(date -d "$(cat "$JOBS_DIR/$name.started")" +%s 2>/dev/null)" || { echo "-"; return; }
+  if [[ -f "$JOBS_DIR/$name.ended" ]]; then
+    end="$(date -d "$(cat "$JOBS_DIR/$name.ended")" +%s 2>/dev/null)" || end="$(date +%s)"
+  else
+    end="$(date +%s)"
+  fi
+  human_secs $((end - start))
+}
+
+job_exit() { cat "$JOBS_DIR/$1.exit" 2>/dev/null || echo "-"; }
+
+job_line() {
+  local name="$1" state
+  state="$(job_state "$name")"
+  local rc=""
+  [[ "$state" == "failed" ]] && rc=" (exit $(job_exit "$name"))"
+  echo "job $name: $state$rc | started $(cat "$JOBS_DIR/$name.started") | elapsed $(job_elapsed "$name") | log $JOBS_DIR/$name.log"
+}
+
+require_job() {
+  valid_job_name "$1" || die2 "invalid job name '$1'"
+  [[ -f "$JOBS_DIR/$1.started" ]] || die2 "no job named '$1'. List them with: camlctl jobs"
+}
+
+list_job_names() {  # oldest first
+  [[ -d "$JOBS_DIR" ]] || return 0
+  find "$JOBS_DIR" -maxdepth 1 -name '*.started' -printf '%T@ %f\n' | sort -n | sed 's/^[^ ]* //; s/\.started$//'
+}
+
+archive_job() {  # keep the previous run of a job name under history/
+  local name="$1" stamp f
+  [[ -f "$JOBS_DIR/$name.started" ]] || return 0
+  stamp="$(tr -d ':' < "$JOBS_DIR/$name.started")"
+  mkdir -p "$JOBS_DIR/history"
+  for f in log args cmd started pid exit ended; do
+    [[ -f "$JOBS_DIR/$name.$f" ]] && mv -f "$JOBS_DIR/$name.$f" "$JOBS_DIR/history/$name.$stamp.$f"
+  done
+  return 0
+}
+
+running_jobs() {
+  local n
+  for n in $(list_job_names); do
+    [[ "$(job_state "$n")" == "running" ]] && echo "$n"
+  done
+  return 0
+}
+
+caml_busy() {  # a caml run or sweep is executing on this box
+  pgrep -f 'caml (run|sweep)( |$)' >/dev/null 2>&1 && return 0
+  [[ -n "$(running_jobs)" ]]
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_help() {
+  cat <<'EOF'
+camlctl: run CAML on this Ubuntu server. From your own machine:
+
+    ssh caml-vps camlctl <command> [args]
+
+Arguments are plain words: no quotes, no $, no spaces inside a value. Copy
+data in under a simple name (scp "My File.csv" caml-vps:churn.csv).
+
+Setup and health
+  info [--offline]            Server facts and network checks (read-only; safe any time)
+  setup [--detach] [--ref REF] [--src ARCHIVE|URL]
+                              Install CAML: apt baseline, uv, the caml user, the workspace.
+                              Idempotent. Use --detach, then: camlctl wait setup 540
+  version                     camlctl and CAML versions
+  update [--ref REF] [--force]
+                              git pull (or check out REF) in the workspace, uv sync
+  tabpfn-token [--check|--remove]
+                              Store the TabPFN key for caml. Interactive: run it yourself
+                              with  ssh -t caml-vps camlctl tabpfn-token
+
+Work (as the caml user, in ~caml/caml-workspace/CAML)
+  caml ARGS...                uv run caml ARGS...   e.g. camlctl caml status
+  install [--force] FW...     install several frameworks, keep going past failures
+  install --all               caml install --all
+  dataset FILE [--name NAME] [--from-encoding ENC] [--replace]
+                              Move an uploaded file into ~caml/data and describe it:
+                              sha256, encoding, separator, header, rows
+  script FILE [ARGS...]       Run a bash (or .py) script you uploaded, as caml, in the
+                              repo; Windows CRLF line endings are stripped first
+
+Long jobs (detached; they survive SSH dropping)
+  start JOB caml|install|script|setup ARGS...
+                              e.g. camlctl start sweep caml sweep FLAML --benchmark B --constraint quick
+  jobs                        every job: state, exit code, elapsed time
+  logs JOB [LINES]            tail of a job's log (default 40 lines)
+  wait JOB [SECONDS]          block until the job ends or SECONDS pass (default 540, max 3600);
+                              exit 0 done, 1 failed, 124 still running
+  stop JOB                    stop a job and everything it started (SIGTERM, then SIGKILL)
+  status                      load, memory, disk, OOM kills, jobs and sweep progress
+  bundle [NAME]               tar.gz of output/, the prepared datasets and job logs, in the
+                              SSH user's ~/caml-bundles/, ready for scp
+
+Exit codes: 0 ok, 1 failed, 2 usage, 3 conflict (already running or exists), 124 wait timed out.
+EOF
+}
+
+cmd_version() {
+  echo "camlctl $CAMLCTL_VERSION"
+  if [[ -f "$REPO/pyproject.toml" ]]; then
+    local rev; rev="$(caml_revision)"
+    echo "caml $(caml_version)${rev:+ (revision $rev)} at $REPO"
+  else
+    echo "caml not set up (expected at $REPO)"
+  fi
+}
+
+http_check() {  # prints the HTTP status, or 000 when unreachable
+  command -v curl >/dev/null 2>&1 || { echo "no-curl"; return; }
+  curl -sS -m 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true
+}
+
+cmd_info() {
+  local offline=0 warn=()
+  [[ "${1:-}" == "--offline" ]] && offline=1
+  local os_id="" os_ver="" pretty="unknown"
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    { os_id="$(. /etc/os-release; echo "${ID:-}")"
+      os_ver="$(. /etc/os-release; echo "${VERSION_ID:-}")"
+      pretty="$(. /etc/os-release; echo "${PRETTY_NAME:-unknown}")"; }
+  fi
+  local arch ram swap disk_dir disk
+  arch="$(uname -m)"
+  ram="$(awk '/^MemTotal:/ {printf "%.1f", $2/1048576}' /proc/meminfo)"
+  swap="$(awk '/^SwapTotal:/ {printf "%.1f", $2/1048576}' /proc/meminfo)"
+  disk_dir="/home"; [[ -d "$disk_dir" ]] || disk_dir="/"
+  disk="$(df -Pk "$disk_dir" | awk 'NR==2 {printf "%.0f", $4/1048576}')"
+  echo "camlctl: $CAMLCTL_VERSION"
+  echo "os: $pretty"
+  echo "arch: $arch"
+  echo "cpus: $(nproc)"
+  echo "ram_gib: $ram"
+  echo "swap_gib: $swap"
+  echo "disk_free_gib: $disk ($disk_dir)"
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "gpu: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+  else
+    echo "gpu: none"
+  fi
+  [[ "$os_id" == "ubuntu" && "$os_ver" == "24.04" ]] || warn+=("CAML is built and tested on Ubuntu 24.04, this is $pretty")
+  [[ "$arch" == "x86_64" ]] || warn+=("not x86_64: several frameworks are only tested on x86_64")
+  awk -v r="$ram" 'BEGIN {exit !(r < 7.5)}' && warn+=("under 8 GB of RAM: H2O, AutoGluon and FEDOT will hit memory kills")
+  (( disk < 40 )) && warn+=("under 40 GiB free on $disk_dir: the full roster needs about 60 GB")
+  if (( offline == 0 )); then
+    local name url code
+    for pair in "pypi https://pypi.org/simple/pip/" "github https://github.com" \
+                "pytorch https://download.pytorch.org/whl/" "openml https://www.openml.org/api/v1/json/task/3913"; do
+      name="${pair%% *}"; url="${pair#* }"
+      code="$(http_check "$url")"
+      if [[ "$code" == "000" || -z "$code" ]]; then
+        echo "net_$name: unreachable ($url)"
+        case "$name" in
+          openml) warn+=("OpenML unreachable: only OpenML benchmarks (test, validation) need it, not your own data") ;;
+          *) warn+=("$name unreachable: installs will fail") ;;
+        esac
+      else
+        echo "net_$name: ok (HTTP $code)"
+      fi
+    done
+  fi
+  if id -u "$CAML_USER" >/dev/null 2>&1; then
+    echo "caml_user: present"
+    echo "uv: $(as_caml / uv --version 2>/dev/null || echo missing)"
+  else
+    echo "caml_user: absent"
+  fi
+  if [[ -f "$REPO/pyproject.toml" ]]; then
+    local rev; rev="$(caml_revision)"
+    echo "caml: $(caml_version)${rev:+ (revision $rev)} at $REPO"
+  else
+    echo "caml: absent"
+  fi
+  local running; running="$(running_jobs | tr '\n' ' ')"
+  echo "jobs_running: ${running:-none}"
+  if (( ${#warn[@]} == 0 )); then
+    echo "checks: ok"
+  else
+    local w
+    for w in "${warn[@]}"; do echo "warning: $w"; done
+    echo "checks: ${#warn[@]} warning(s)"
+  fi
+}
+
+cmd_setup() {
+  local detach=0 ref="" src="" setup_args=("$@")
+  while (( $# )); do
+    case "$1" in
+      --detach) detach=1 ;;
+      --ref) ref="${2:-}"; shift ;;
+      --src) src="${2:-}"; shift ;;
+      *) die2 "setup: unknown option '$1'" ;;
+    esac
+    shift
+  done
+  [[ $EUID -eq 0 ]] || die "setup needs root"
+  if [[ "$SELF" != "$(readlink -f "$BIN_PATH" 2>/dev/null)" ]]; then
+    install -D -m 0755 "$SELF" "$BIN_PATH"
+  fi
+  if (( detach )); then
+    local pass=()
+    for a in "${setup_args[@]}"; do [[ "$a" == "--detach" ]] || pass+=("$a"); done
+    cmd_start setup setup "${pass[@]}"
+    return
+  fi
+  local sdir="$SELF_DIR"
+  [[ -f "$sdir/bootstrap_vps.sh" ]] || sdir="$REPO/scripts"
+  [[ -f "$sdir/bootstrap_vps.sh" ]] || die "can't find bootstrap_vps.sh next to camlctl. Run setup from a CAML clone: bash /opt/caml-src/scripts/camlctl setup"
+  echo "==> [1/3] system bootstrap: apt packages, uv, the $CAML_USER user, swap ($(utc_now))"
+  bash "$sdir/bootstrap_vps.sh" || die "bootstrap_vps.sh failed (see above)"
+  refresh_paths
+  echo "==> [2/3] workspace, as $CAML_USER ($(utc_now))"
+  local envs=()
+  if [[ -n "$src" && -f "$src" ]]; then
+    install -m 0644 "$src" /tmp/camlctl-src.tar.gz
+    envs+=(CAML_SRC=/tmp/camlctl-src.tar.gz)
+  elif [[ -n "$src" ]]; then
+    envs+=(CAML_SRC="$src")
+  fi
+  [[ -n "$ref" ]] && envs+=(CAML_REF="$ref")
+  install -m 0644 "$sdir/setup_workspace.sh" /tmp/camlctl-setup_workspace.sh
+  as_caml "$CAML_HOME" env "${envs[@]}" bash /tmp/camlctl-setup_workspace.sh || die "setup_workspace.sh failed (see above)"
+  echo "==> [3/3] camlctl and the data folder ($(utc_now))"
+  if [[ -f "$REPO/scripts/camlctl" ]]; then
+    install -m 0755 "$REPO/scripts/camlctl" "$BIN_PATH"
+  fi
+  install -d -o "$CAML_USER" -g "$(caml_group)" -m 0700 "$DATA_DIR"
+  echo "setup complete ($(utc_now))"
+  cmd_version
+}
+
+cmd_update() {
+  local ref="" force=0
+  while (( $# )); do
+    case "$1" in
+      --ref) ref="${2:-}"; shift ;;
+      --force) force=1 ;;
+      *) die2 "update: unknown option '$1'" ;;
+    esac
+    shift
+  done
+  require_repo
+  [[ -d "$REPO/.git" ]] || die "this workspace was deployed from an archive (no .git). Update it from your machine with scripts/sync_vps.sh"
+  if (( force == 0 )) && caml_busy; then
+    die3 "a CAML run, sweep or camlctl job is running; updating the code under it would mix revisions. Wait for it, or stop it first (camlctl jobs)."
+  fi
+  as_caml "$REPO" git fetch -q --tags origin || die "git fetch failed"
+  if [[ -n "$ref" ]]; then
+    as_caml "$REPO" git checkout -q "$ref" || die "git checkout $ref failed"
+  else
+    as_caml "$REPO" git pull -q --ff-only || die "git pull failed (on a fixed version? use --ref main)"
+  fi
+  as_caml "$REPO" uv sync -q || die "uv sync failed"
+  [[ $EUID -eq 0 && -f "$REPO/scripts/camlctl" ]] && install -m 0755 "$REPO/scripts/camlctl" "$BIN_PATH"
+  cmd_version
+}
+
+cmd_caml() {
+  require_repo
+  if [[ -z "${CAMLCTL_JOB:-}" ]]; then
+    case "${1:-} ${*:2}" in
+      "sweep "*--dry-run*) ;;
+      "sweep "*|"run "*|"install --all"*)
+        echo "camlctl: tip: this can take hours; run it detached with  camlctl start JOB caml $*" >&2 ;;
+    esac
+  fi
+  as_caml "$REPO" uv run caml "$@"
+}
+
+cmd_install() {
+  require_repo
+  local force=() fws=() all=0
+  while (( $# )); do
+    case "$1" in
+      --force) force=(--force) ;;
+      --all) all=1 ;;
+      -*) die2 "install: unknown option '$1'" ;;
+      *) fws+=("$1") ;;
+    esac
+    shift
+  done
+  if (( all )); then
+    as_caml "$REPO" uv run caml install --all "${force[@]}"
+    return
+  fi
+  (( ${#fws[@]} )) || die2 "name the frameworks, e.g. camlctl install AutoGluon FLAML  (or --all)"
+  local ok=() failed=() fw
+  for fw in "${fws[@]}"; do
+    [[ "$fw" == "NaiveAutoML" ]] && echo "camlctl: note: NaiveAutoML fails every task (upstream bug); installing it anyway"
+    echo "=== $fw ($(utc_now))"
+    if as_caml "$REPO" uv run caml install "$fw" "${force[@]}"; then ok+=("$fw"); else failed+=("$fw"); fi
+  done
+  echo
+  echo "installed: ${ok[*]:-none}"
+  echo "failed: ${failed[*]:-none}"
+  (( ${#failed[@]} == 0 ))
+}
+
+cmd_script() {
+  require_repo
+  local src="${1:-}"
+  [[ -n "$src" ]] || die2 "usage: camlctl script FILE [ARGS...]"
+  shift
+  [[ -f "$src" ]] || die "no such file: $src (upload it first: scp FILE caml-vps:NAME.sh)"
+  local dir="$CAML_HOME/.camlctl-scripts" dest
+  install -d -o "$CAML_USER" -g "$(caml_group)" -m 0700 "$dir"
+  dest="$dir/$(basename "$src")"
+  # Editors on Windows write CRLF, and bash on the server then fails with
+  # "$'\r': command not found".
+  sed 's/\r$//' "$src" > "$dest"
+  chown "$CAML_USER:$(caml_group)" "$dest" 2>/dev/null
+  chmod 0700 "$dest"
+  case "$dest" in
+    *.py) as_caml "$REPO" uv run python "$dest" "$@" ;;
+    *) as_caml "$REPO" bash "$dest" "$@" ;;
+  esac
+}
+
+cmd_start() {
+  (( $# >= 2 )) || die2 "usage: camlctl start JOB caml|install|script|setup ARGS..."
+  local name="$1" sub="$2"; shift 2
+  valid_job_name "$name" || die2 "invalid job name '$name': letters, digits, '.', '_' or '-', up to 64, starting with a letter or digit"
+  case "$sub" in
+    caml|install|script) require_repo ;;
+    setup) ;;
+    *) die2 "camlctl start runs caml, install, script or setup, not '$sub'" ;;
+  esac
+  local args=("$sub" "$@")
+  if [[ "$sub" == "script" ]]; then
+    [[ -n "${args[1]:-}" && -f "${args[1]}" ]] || die "no such file: ${args[1]:-<missing>}"
+    args[1]="$(readlink -f "${args[1]}")"
+  fi
+  local state; state="$(job_state "$name")"
+  if [[ "$state" == "running" || "$state" == "starting" ]]; then
+    die3 "job '$name' is already running. Watch it: camlctl logs $name   (or pick another job name)"
+  fi
+  mkdir -p "$JOBS_DIR"
+  [[ $EUID -eq 0 ]] && chmod 0700 "$STATE_DIR" "$JOBS_DIR"
+  archive_job "$name"
+  printf '%s\0' "${args[@]}" > "$JOBS_DIR/$name.args"
+  local shown; shown="$(printf '%q ' "${args[@]}")"
+  echo "${shown% }" > "$JOBS_DIR/$name.cmd"
+  utc_now > "$JOBS_DIR/$name.started"
+  setsid -f bash "$SELF" __job "$name" "${args[@]}" > "$JOBS_DIR/$name.log" 2>&1 < /dev/null
+  local i
+  for ((i = 0; i < 50; i++)); do
+    [[ -s "$JOBS_DIR/$name.pid" ]] && break
+    sleep 0.1
+  done
+  echo "started job $name (pid $(cat "$JOBS_DIR/$name.pid" 2>/dev/null || echo '?')) at $(cat "$JOBS_DIR/$name.started")"
+  echo "command: $(cat "$JOBS_DIR/$name.cmd")"
+  echo "log: $JOBS_DIR/$name.log"
+  echo "check: camlctl wait $name 540   |   camlctl logs $name   |   camlctl status"
+}
+
+cmd_job_runner() {  # internal: the detached session leader of a job
+  local name="$1"; shift
+  echo $$ > "$JOBS_DIR/$name.pid"
+  # Survive the SIGTERM that `camlctl stop` sends the whole session, so the
+  # exit code still gets written once the command has wound down. (A handler,
+  # not an ignore: ignored signals would stay ignored in the children.)
+  trap 'echo "== camlctl: stop requested"' TERM
+  echo "== camlctl job $name: $(cat "$JOBS_DIR/$name.cmd")"
+  echo "== started $(utc_now)"
+  local rc=0
+  CAMLCTL_JOB="$name" bash "$SELF" "$@" || rc=$?
+  echo "== finished $(utc_now), exit code $rc"
+  utc_now > "$JOBS_DIR/$name.ended"
+  echo "$rc" > "$JOBS_DIR/$name.exit"
+  exit "$rc"
+}
+
+cmd_jobs() {
+  local names; names="$(list_job_names)"
+  if [[ -z "$names" ]]; then echo "(no jobs yet)"; return; fi
+  printf '%-16s %-9s %-5s %-21s %-9s %s\n' NAME STATE EXIT STARTED ELAPSED COMMAND
+  local n
+  for n in $names; do
+    printf '%-16s %-9s %-5s %-21s %-9s %s\n' "$n" "$(job_state "$n")" "$(job_exit "$n")" \
+      "$(cat "$JOBS_DIR/$n.started")" "$(job_elapsed "$n")" "$(cut -c1-90 "$JOBS_DIR/$n.cmd")"
+  done
+}
+
+cmd_logs() {
+  local name="${1:-}" lines="${2:-40}"
+  [[ -n "$name" ]] || die2 "usage: camlctl logs JOB [LINES]"
+  require_job "$name"
+  [[ "$lines" =~ ^[0-9]+$ ]] || die2 "LINES must be a number"
+  (( lines > 2000 )) && lines=2000
+  job_line "$name"
+  tail -n "$lines" "$JOBS_DIR/$name.log"
+}
+
+cmd_wait() {
+  local name="${1:-}" secs="${2:-540}"
+  [[ -n "$name" ]] || die2 "usage: camlctl wait JOB [SECONDS]"
+  require_job "$name"
+  [[ "$secs" =~ ^[0-9]+$ ]] || die2 "SECONDS must be a number"
+  (( secs > 3600 )) && secs=3600
+  local deadline=$((SECONDS + secs)) state
+  while true; do
+    state="$(job_state "$name")"
+    [[ "$state" == "running" || "$state" == "starting" ]] || break
+    (( SECONDS >= deadline )) && break
+    sleep 2
+  done
+  job_line "$name"
+  tail -n 15 "$JOBS_DIR/$name.log"
+  case "$state" in
+    done) return 0 ;;
+    running|starting) return 124 ;;
+    *) return 1 ;;
+  esac
+}
+
+marked_pids() {  # PIDs whose environment carries CAMLCTL_JOB=$1
+  local p
+  for p in /proc/[0-9]*; do
+    [[ -r "$p/environ" ]] || continue
+    if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qxF "CAMLCTL_JOB=$1"; then
+      echo "${p#/proc/}"
+    fi
+  done
+  return 0
+}
+
+cmd_stop() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die2 "usage: camlctl stop JOB"
+  require_job "$name"
+  local state; state="$(job_state "$name")"
+  if [[ "$state" != "running" && "$state" != "starting" ]]; then
+    echo "job $name is not running ($state)."
+    return 0
+  fi
+  local sid; sid="$(cat "$JOBS_DIR/$name.pid")"
+  echo "stopping job $name (session $sid) ..."
+  # A sweep catches SIGTERM: it kills the current framework job and exits,
+  # leaving that job unrecorded so a re-run resumes it.
+  pkill -TERM -s "$sid" 2>/dev/null
+  local i left
+  for ((i = 0; i < 60; i++)); do
+    left="$(pgrep -s "$sid" 2>/dev/null; marked_pids "$name")"
+    [[ -z "$left" ]] && break
+    sleep 1
+  done
+  if [[ -n "$left" ]]; then
+    echo "still running after 60s; sending SIGKILL"
+    local p pg
+    for p in $left; do
+      pg="$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ')"
+      [[ -n "$pg" && "$pg" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]] && kill -KILL -- "-$pg" 2>/dev/null
+      kill -KILL "$p" 2>/dev/null
+    done
+  fi
+  if [[ ! -f "$JOBS_DIR/$name.exit" ]]; then
+    utc_now > "$JOBS_DIR/$name.ended"
+    echo 143 > "$JOBS_DIR/$name.exit"
+  fi
+  echo "== camlctl: stopped by camlctl stop at $(utc_now)" >> "$JOBS_DIR/$name.log"
+  job_line "$name"
+}
+
+oom_count() {
+  if ! dmesg >/dev/null 2>&1; then echo "unknown (can't read the kernel log)"; return; fi
+  dmesg | grep -ciE 'killed process|out of memory' || true
+}
+
+cmd_status() {
+  echo "== $(date -u '+%Y-%m-%d %H:%M:%S') UTC | $(uptime -p 2>/dev/null) | load $(cut -d' ' -f1-3 /proc/loadavg) | $(nproc) CPUs"
+  awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} /^SwapTotal:/ {st=$2} /^SwapFree:/ {sf=$2}
+       END {printf "memory: %.1f GiB available of %.1f GiB | swap used: %.1f of %.1f GiB\n", a/1048576, t/1048576, (st-sf)/1048576, st/1048576}' /proc/meminfo
+  local disk_dir="/home"; [[ -d "$disk_dir" ]] || disk_dir="/"
+  df -Pk "$disk_dir" | awk -v d="$disk_dir" 'NR==2 {printf "disk: %.0f GiB free of %.0f GiB (%s)\n", $4/1048576, $2/1048576, d}'
+  echo "oom kills since boot: $(oom_count)"
+  echo "== jobs"
+  cmd_jobs
+  # Sweep progress, newest sweep jobs first (at most 3). A --dry-run reads
+  # the ledger and returns before the sweep lock, so it is safe while the
+  # sweep runs.
+  local n shown=0 names
+  names="$(list_job_names | tac)"
+  for n in $names; do
+    local -a args=()
+    mapfile -d '' -t args < "$JOBS_DIR/$n.args" 2>/dev/null || continue
+    [[ "${args[0]:-}" == "caml" && "${args[1]:-}" == "sweep" ]] || continue
+    (( shown++ >= 3 )) && break
+    echo "== sweep job $n ($(job_state "$n"), elapsed $(job_elapsed "$n"))"
+    grep -E '^\[[0-9]+/[0-9]+\]|^ *-> ' "$JOBS_DIR/$n.log" | tail -n 2
+    local sargs=("${args[@]:1}") a dry=1
+    for a in "${sargs[@]}"; do [[ "$a" == "--dry-run" ]] && dry=0; done
+    (( dry )) && sargs+=(--dry-run)
+    local out
+    if out="$(as_caml "$REPO" uv run caml "${sargs[@]}" 2>&1)"; then
+      sed -n '/^FRAMEWORK/,$p' <<< "$out"
+    else
+      echo "(couldn't read the sweep's progress: $(tail -n 1 <<< "$out"))"
+    fi
+  done
+  return 0
+}
+
+cmd_dataset() {
+  local src="" name="" enc="" replace=0
+  while (( $# )); do
+    case "$1" in
+      --name) name="${2:-}"; shift ;;
+      --from-encoding) enc="${2:-}"; shift ;;
+      --replace) replace=1 ;;
+      -*) die2 "dataset: unknown option '$1'" ;;
+      *) [[ -z "$src" ]] || die2 "dataset takes one FILE"; src="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$src" ]] || die2 "usage: camlctl dataset FILE [--name NAME] [--from-encoding ENC] [--replace]"
+  [[ -f "$src" ]] || die "no such file: $src (upload it first, e.g. scp FILE caml-vps:churn.csv)"
+  require_user
+  local base="${name:-$(basename "$src")}"
+  [[ "$base" =~ $FILE_NAME_RE ]] || die2 "'$base' isn't a simple file name (letters, digits, '.', '_', '-'; no spaces). Add --name, e.g. --name churn.csv"
+  install -d -o "$CAML_USER" -g "$(caml_group)" -m 0700 "$DATA_DIR"
+  local dest="$DATA_DIR/$base" src_abs
+  src_abs="$(readlink -f "$src")"
+  if [[ "$src_abs" != "$dest" ]]; then
+    if [[ -e "$dest" ]] && (( replace == 0 )); then
+      if cmp -s "$src_abs" "$dest"; then
+        rm -f "$src_abs"
+      else
+        die3 "$dest already exists with different content. Add --replace, or pick another --name."
+      fi
+    else
+      mv -f "$src_abs" "$dest" || die "couldn't move $src_abs to $dest"
+    fi
+  fi
+  chown "$CAML_USER:$(caml_group)" "$dest" 2>/dev/null
+  chmod 0600 "$dest"
+  local magic; magic="$(head -c 4 "$dest" | od -An -tx1 | tr -d ' \n')"
+  echo "path: $dest"
+  echo "bytes: $(stat -c %s "$dest") ($(du -h "$dest" | cut -f1))"
+  echo "sha256: $(sha256sum "$dest" | cut -d' ' -f1)"
+  case "$magic" in
+    504b0304*)
+      echo "format: zip (an Excel .xlsx or a zipped file)"
+      echo "status: unsupported"
+      echo "fix: export a CSV instead (Excel: File > Save As > CSV UTF-8; Numbers: File > Export To > CSV, Unicode UTF-8), or unzip it first"
+      return 2 ;;
+    50415231*)
+      echo "format: parquet"
+      echo "status: ok"
+      echo "next: camlctl caml prepare-data $dest --target COLUMN --name ${base%.*} --folds 5"
+      return 0 ;;
+  esac
+  if [[ -n "$enc" ]]; then
+    local orig="$dest.orig"
+    [[ -e "$orig" ]] && die3 "$orig exists: this file was converted already"
+    iconv -f "$enc" -t UTF-8 "$dest" > "$dest.utf8" || { rm -f "$dest.utf8"; die "iconv couldn't convert from $enc (list encodings with: iconv -l)"; }
+    mv "$dest" "$orig"
+    mv "$dest.utf8" "$dest"
+    chown "$CAML_USER:$(caml_group)" "$dest" "$orig" 2>/dev/null
+    chmod 0600 "$dest" "$orig"
+    echo "converted: from $enc to UTF-8; the original is kept as $orig"
+    echo "sha256_converted: $(sha256sum "$dest" | cut -d' ' -f1)"
+    magic="$(head -c 4 "$dest" | od -An -tx1 | tr -d ' \n')"
+  fi
+  echo "format: text"
+  local utf8=1
+  if iconv -f UTF-8 -t UTF-8 "$dest" > /dev/null 2>&1; then
+    [[ "$magic" == efbbbf* ]] && echo "encoding: utf-8 (with a BOM; fine)" || echo "encoding: utf-8"
+  else
+    utf8=0
+    echo "encoding: NOT UTF-8 (file(1) says: $(file -b --mime-encoding "$dest" 2>/dev/null || echo unknown))"
+  fi
+  if head -c 65536 "$dest" | grep -q $'\r$'; then echo "line_endings: CRLF (fine)"; else echo "line_endings: LF"; fi
+  local header sep="," sep_name="comma"
+  header="$(head -n 1 "$dest" | sed $'s/^\xEF\xBB\xBF//; s/\r$//')"
+  if [[ "$header" != *,* ]]; then
+    local c best=0 cnt
+    for c in ";" $'\t' "|"; do
+      cnt="$(tr -cd "$c" <<< "$header" | wc -c)"
+      if (( cnt > best )); then best=$cnt; sep="$c"; fi
+    done
+    case "$sep" in ";") sep_name="semicolon" ;; $'\t') sep_name="tab" ;; "|") sep_name="pipe" ;; *) sep_name="comma" ;; esac
+  fi
+  local cols rows last
+  cols=$(( $(tr -cd "$sep" <<< "$header" | wc -c) + 1 ))
+  rows=$(( $(wc -l < "$dest") - 1 ))
+  last="$(tail -c 1 "$dest" | od -An -tx1 | tr -d ' \n')"
+  [[ "$last" != "0a" && -s "$dest" ]] && rows=$((rows + 1))
+  echo "separator: $sep_name"
+  echo "columns: $cols (from the header line)"
+  echo "rows: $rows (lines after the header)"
+  echo "header: ${header:0:400}"
+  if (( utf8 )); then
+    echo "status: ok"
+    echo "next: camlctl caml prepare-data $dest --target COLUMN --name ${base%.*} --folds 5"
+  else
+    echo "status: needs-conversion"
+    echo "fix: camlctl dataset $dest --from-encoding WINDOWS-1252   (Excel on Windows; MACINTOSH for old Mac exports; ask the user if unsure)"
+  fi
+}
+
+cmd_bundle() {
+  require_repo
+  local name="${1:-caml-results-$(date -u +%Y%m%d-%H%M%SZ)}"
+  valid_job_name "$name" || die2 "invalid bundle name '$name'"
+  local owner="${SUDO_USER:-$(id -un)}" outdir
+  outdir="${CAMLCTL_BUNDLES:-$(getent passwd "$owner" | cut -d: -f6)/caml-bundles}"
+  mkdir -p "$outdir"
+  local out="$outdir/$name.tar.gz"
+  [[ -e "$out" ]] && die3 "$out already exists; pick another name"
+  local stage; stage="$(mktemp -d)"
+  mkdir "$stage/$name"
+  [[ -d "$REPO/output" ]] && ln -s "$REPO/output" "$stage/$name/output"
+  [[ -d "$REPO/input/datasets" ]] && ln -s "$REPO/input/datasets" "$stage/$name/datasets"
+  [[ -d "$JOBS_DIR" ]] && ln -s "$JOBS_DIR" "$stage/$name/jobs"
+  {
+    echo "# camlctl bundle $name, $(utc_now)"
+    cmd_version
+    echo
+    cmd_info --offline
+    echo
+    as_caml "$REPO" uv run caml status 2>&1
+  } > "$stage/$name/server-info.txt" 2>&1
+  tar -czhf "$out" -C "$stage" "$name" || { rm -rf "$stage"; die "tar failed"; }
+  rm -rf "$stage"
+  chmod 0600 "$out"
+  [[ $EUID -eq 0 ]] && chown "$owner:" "$outdir" "$out" 2>/dev/null
+  echo "bundle: $out"
+  echo "bytes: $(stat -c %s "$out") ($(du -h "$out" | cut -f1))"
+  echo "sha256: $(sha256sum "$out" | cut -d' ' -f1)"
+  echo "contains: $name/output, $name/datasets, $name/jobs, $name/server-info.txt"
+  echo "copy: scp caml-vps:${out#"$(getent passwd "$owner" | cut -d: -f6)"/} ."
+  echo "unpack: tar -xzf $name.tar.gz"
+}
+
+cmd_tabpfn_token() {
+  require_user
+  local f="$CAML_HOME/.caml-secrets"
+  case "${1:-}" in
+    --check)
+      # shellcheck disable=SC2016  # expanded by caml's login shell, not here
+      as_caml "$CAML_HOME" bash -c 'if [ -n "${TABPFN_TOKEN:-}" ]; then echo token-set; else echo token-missing; fi'
+      return ;;
+    --remove)
+      rm -f "$f"
+      echo "removed $f"
+      return ;;
+    "") ;;
+    *) die2 "usage: camlctl tabpfn-token [--check|--remove]" ;;
+  esac
+  [[ -t 0 ]] || die "this asks for the key, so it needs a terminal. Run it yourself: ssh -t caml-vps camlctl tabpfn-token"
+  local tok=""
+  read -rsp "TabPFN API key for $CAML_USER (input hidden): " tok
+  echo
+  [[ -n "$tok" ]] || die "empty input; nothing saved"
+  install -m 0600 -o "$CAML_USER" -g "$(caml_group)" /dev/null "$f"
+  printf 'export TABPFN_TOKEN=%q\n' "$tok" > "$f"
+  tok=""
+  # A login shell reads ~/.profile; Ubuntu's ~/.bashrc returns early for
+  # non-interactive shells, so the export must not go there.
+  local line='[ -f ~/.caml-secrets ] && . ~/.caml-secrets'
+  if ! grep -qxF "$line" "$CAML_HOME/.profile" 2>/dev/null; then
+    echo "$line" >> "$CAML_HOME/.profile"
+    chown "$CAML_USER:$(caml_group)" "$CAML_HOME/.profile" 2>/dev/null
+  fi
+  echo "saved for $CAML_USER (not shown). Check: camlctl tabpfn-token --check"
+}
+
+# --- main ------------------------------------------------------------------
+
+cmd="${1:-help}"
+[[ $# -gt 0 ]] && shift
+case "$cmd" in
+  help|-h|--help) cmd_help; exit 0 ;;
+  --version) echo "camlctl $CAMLCTL_VERSION"; exit 0 ;;
+esac
+
+if [[ $EUID -ne 0 && "${CAMLCTL_ALLOW_NONROOT:-0}" != "1" ]]; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    exec sudo -n -- bash "$SELF" "$cmd" "$@"
+  fi
+  die "camlctl must run as root, or as a user with passwordless sudo"
+fi
+refresh_paths
+
+case "$cmd" in
+  info) cmd_info "$@" ;;
+  setup) cmd_setup "$@" ;;
+  version) cmd_version ;;
+  update) cmd_update "$@" ;;
+  caml) cmd_caml "$@" ;;
+  install) cmd_install "$@" ;;
+  script) cmd_script "$@" ;;
+  dataset) cmd_dataset "$@" ;;
+  start) cmd_start "$@" ;;
+  __job) cmd_job_runner "$@" ;;
+  jobs) cmd_jobs ;;
+  logs) cmd_logs "$@" ;;
+  wait) cmd_wait "$@" ;;
+  stop) cmd_stop "$@" ;;
+  status) cmd_status ;;
+  bundle) cmd_bundle "$@" ;;
+  tabpfn-token) cmd_tabpfn_token "$@" ;;
+  *) echo "camlctl: unknown command '$cmd'" >&2; cmd_help >&2; exit 2 ;;
+esac

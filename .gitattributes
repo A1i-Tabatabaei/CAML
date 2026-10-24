@@ -1,0 +1,17 @@
+# Keep LF line endings in every checkout, including on Windows.
+#
+# Git for Windows defaults to core.autocrlf=true, which turns LF into CRLF on
+# checkout, and `git archive` applies the same conversion. Shell scripts
+# that reach the Ubuntu server with CRLF fail there with
+# "$'\r': command not found". That covers scripts/*.sh and scripts/camlctl
+# pushed by provision_vps.sh from Git Bash, and anything copied over by
+# hand. CI's operator-windows job checks this on a real Windows checkout.
+* text=auto eol=lf
+
+# Binary files: never convert.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.parquet binary
+*.gz binary
+*.zip binary

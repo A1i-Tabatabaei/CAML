@@ -2,9 +2,13 @@
 
 ## Where the numbers are
 
+On the server they're under the repo (`~caml/caml-workspace/CAML`). After
+`camlctl bundle` and `scp`, the same files are under `<bundle>/` on your machine.
+
 | File | What |
 |---|---|
 | `output/results.csv` | One row per job: framework × task × fold. Append-only, across every run on the server. |
+| `<bundle>/jobs/`, `<bundle>/server-info.txt` | In a `camlctl bundle`: camlctl's job logs, and the server's facts, versions and installed frameworks at bundle time |
 | `output/sweeps/<sweep>/ledger.jsonl` | One record per sweep job: status (`ok`/`error`/`timeout`/`killed`/`crash`/`no_result`), wall time, host CPU and RAM, log path |
 | `output/sweeps/<sweep>/logs/<fw>.<task>.<fold>.log` | The full output of one job |
 | `input/datasets/<name>/dataset.json` | Provenance of the prepared data |

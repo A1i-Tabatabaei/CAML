@@ -6,15 +6,45 @@ keep it current as decisions are made or revised.
 
 ## Session handoff — read this first
 
-**Newest work (2026-10-24, later): v1.0.1 prepared locally, not pushed.**
+**Newest work (2026-10-24, evening): v1.1.0, Windows/macOS/Linux operators
+for AI agents.** Ali: "update this new repository to support windows, mac,
+and linux ... optimize it for ai agents ... the agent should first determine
+what os it's running on and then choose the right scripts and commands ...
+(BUT ALL OF THEM SHOULD RUN CAML ON THE UBUNTU VPS)". Also: a field report in
+the prompts (a Mac user and later Ali on Windows will send theirs back for
+fixes), three copy-paste prompts in the README, then "commit and push to
+both private and public repos".
+- **Design decision**: the operator side is only `ssh` + `scp`, identical on
+  every OS. All server work goes through **`scripts/camlctl`**
+  (`/usr/local/bin/camlctl`): `ssh caml-vps camlctl <plain words>`, so no
+  command crosses PowerShell/cmd/zsh/bash with nested quotes. The only raw
+  remote commands (setup's first two) use one pair of double quotes with no
+  `$`, backtick, `%`, `!` or `"`. `tests/test_agent_docs.py` enforces that
+  rule on every doc command. Per-OS differences (local hashing, unpacking,
+  SSH setup, gotchas) live in `skills/caml-benchmark/references/operator-*.md`.
+- **Field reports**: `references/field-report.md` (template), and
+  `caml-field-report-<os>.md` in every prompt. When Ali hands one back:
+  fold each problem into camlctl, the profiles, troubleshooting and
+  known-issues (KI-16, KI-17), the same way as any bug.
+- **Verification**: unit tests run camlctl as an ordinary user with a fake
+  uv. CI's `server-e2e` runs `tests/e2e/agent_flow.sh` as root over SSH
+  against the runner itself. The same script can target a disposable real
+  VPS (`CAML_E2E_SOURCE=github tests/e2e/agent_flow.sh caml-vps`): do
+  that on the pilot box first (KI-16).
+- `.gitattributes` (`* text=auto eol=lf`): Windows clones and their
+  `git archive` output would otherwise be CRLF (verified in a scratch repo).
+- Details: troubleshooting "Windows, macOS and Linux as the operator
+  machine", CHANGELOG [1.1.0].
+
+**Earlier (2026-10-24, later): v1.0.1 prepared locally.**
 A Mac-oriented agent prompt (`docs/getting-started/agent-prompt.md`) for
 "implement CAML on my dataset ... and also monitor it", plus two bugs it
 exposed: the operator-side scripts (`provision_vps.sh`, `sync_vps.sh` via
 `lib_package.sh`) used GNU-only `mktemp --suffix`/`tar --transform` and
 failed on macOS; and `prepare-data` mishandled semicolon CSVs, decimal
 commas and non-UTF-8 exports. Both fixed with tests (CI now has a macOS
-job). Details: troubleshooting "macOS as the operator machine". **Next**:
-Ali approves pushing and tagging v1.0.1; then the paper plan when Ali says.
+job). Details: troubleshooting "macOS as the operator machine". Pushed and
+tagged together with v1.1.0. **Next**: the paper plan when Ali says.
 
 **Earlier (2026-10-24): CAML v1.0.0 is open source and public.** Ali:
 "I need you to open-source it and make it public but before that I need

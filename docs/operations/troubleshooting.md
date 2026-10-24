@@ -671,6 +671,123 @@ guessed: a wrong guess would silently corrupt labels. Tests:
 `tests/test_prepare.py` (separator detection, decimal commas, BOM+CRLF,
 Mac Roman).
 
+## Windows, macOS and Linux as the operator machine (2026-10-24, v1.1.0)
+
+Ali: "update this new repository to support windows, mac, and linux ... the
+goal is for agents to handle running CAML not humans so optimize it for ai
+agents ... the agent should first determine what os it's running on and then
+choose the right scripts and commands ... (BUT ALL OF THEM SHOULD RUN CAML ON
+THE UBUNTU VPS)". The design that came out of it: one server-side command,
+`scripts/camlctl` (installed to `/usr/local/bin`), so the operator side is
+only `ssh caml-vps camlctl <plain words>` and `scp`, identical on every OS.
+On top of that, one operator profile per OS
+(`skills/caml-benchmark/references/operator-{windows,macos,linux}.md`) holds
+the local commands and gotchas. The entries below are the problems that
+shaped it. Unless an entry says "verified", it's established by analysis
+and by CI, not yet by a user's agent in the field: the field reports
+(`references/field-report.md`) exist to close that gap (KI-16, KI-17).
+
+### Remote commands that only work in one local shell
+
+**Symptom**: the documented shape
+`ssh HOST "sudo -iu caml bash -lc 'cd ~/caml-workspace/CAML && uv run caml ...'"`
+had already broken repeatedly on quoting from Linux (hence the old "write a
+script, scp it, run it" rule in `vps.md`). From other shells it gets worse:
+- PowerShell expands `$VAR` and backtick escapes inside double quotes.
+- Windows PowerShell 5.1 strips `"` inside an argument passed to a native
+  program, and drops empty arguments.
+- cmd.exe expands `%VAR%` and doesn't treat single quotes as quotes.
+- Interactive zsh doesn't treat `#` as a comment.
+
+A command copied from the docs could do something different on each OS.
+**Fix**: `camlctl` does the `sudo -u caml`, the `cd`, the login environment
+(uv on PATH, `TABPFN_TOKEN` from `~/.profile`) and the detaching itself, so
+every documented server command is plain words. The only raw shell commands
+left (setup's first two lines) use one pair of double quotes with no `$`,
+backtick, `%`, `!` or inner `"`, which every one of those shells passes
+through unchanged. `tests/test_agent_docs.py` lints every `ssh <host> ...`
+command in the README, the prompts and the skill against that rule, and
+checks that every `camlctl` subcommand they mention exists. CI's Windows
+job checks, under PowerShell 5.1 and 7, that the documented strings reach a
+native program byte for byte. The POSIX job checks the same under bash and
+zsh.
+
+### CRLF line endings from a Windows clone reach the server
+
+**Symptom** (verified locally, 2026-10-24, by simulating Windows' default
+`core.autocrlf=true` in a scratch repo): a checkout converts every `.sh` to
+CRLF, and **`git archive` applies the same conversion**. So
+`provision_vps.sh` run from Git Bash on Windows would push CRLF
+`bootstrap_vps.sh` and `setup_workspace.sh`, and bash on the server fails
+with `$'\r': command not found`.
+**Fix**: `.gitattributes` with `* text=auto eol=lf`. With it, the same
+experiment gives LF both in the checkout and in the archive. CI's
+`operator-windows` job checks both on a real Windows checkout. Scripts an
+agent writes on Windows may still be CRLF, so `camlctl script` strips `\r`
+before running them (`tests/test_camlctl.py`; the test fails without the
+stripping).
+
+### ssh can't read a config file written by Windows PowerShell 5.1
+
+**Symptom** (expected): `"Host caml-vps ..." > $env:USERPROFILE\.ssh\config`
+or `Out-File` in Windows PowerShell 5.1 writes UTF-16LE with a BOM, which
+OpenSSH doesn't parse. Notepad tends to save a new `config` as
+`config.txt`.
+**Fix**: the docs create it with a here-string piped to
+`Add-Content -Encoding ascii`. CI's Windows job parses that file with
+`ssh -G` under PowerShell 5.1 and 7. It also writes a config the wrong way
+and records what ssh makes of it, so the claim is checked on real Windows.
+
+### `UseKeychain` breaks a shared ssh config off macOS
+
+**Symptom** (verified on OpenSSH 9.6p1, Ubuntu): `Bad configuration option:
+usekeychain` and ssh refuses the whole file. That happens when a Mac's
+`~/.ssh/config` (with the keychain lines the Mac setup recommends) is
+reused on Linux or Windows, for example through dotfiles.
+**Fix**: the Mac profile says so, and suggests `IgnoreUnknown UseKeychain` as
+the first line. `tests/operator/posix.sh` proves the fix on Linux. The
+Windows and Linux configs never include the keychain lines.
+
+### Agent shell tools time out, and SSH sessions drop
+
+**Symptom**: setup takes 5–15 minutes, installs 30–60 and sweeps hours,
+while agent shell tools stop a command after 2–10 minutes, and a dropped
+SSH session kills its foreground command. The old answer was a hand-written
+`setsid nohup ... & disown` line per job, plus guessing from log tails
+whether it had finished.
+**Fix**: `camlctl start JOB ...` runs any camlctl work command in its own
+session and records its PID, command, start and end times, and **exit
+code**. `camlctl wait JOB SECONDS` blocks on the server and exits 0, 1 or
+124 (still running). `camlctl jobs` shows `lost` when a job has neither an
+exit code nor a process (a reboot). `camlctl stop` sends SIGTERM to the
+whole session, then SIGKILL to anything left, including processes found by
+the `CAMLCTL_JOB` environment marker that every job's processes inherit.
+
+### Excel's default CSV on Windows isn't UTF-8
+
+**Symptom**: Excel's "CSV (Comma delimited)" is Windows-1252 (and with
+European regional settings, semicolon-separated with decimal commas).
+Since 1.0.1, `prepare-data` refuses it with an `iconv` hint. But the agent
+then had to compose an `iconv` command through ssh, and from PowerShell the
+quoting made that fragile.
+**Fix**: `camlctl dataset FILE` takes the upload into `~caml/data`, reports
+`encoding: NOT UTF-8` with `status: needs-conversion` and a ready `fix:`
+line, and `--from-encoding WINDOWS-1252` (or `MACINTOSH`) converts it,
+keeping the original as `.orig`. CI's server e2e feeds it exactly such a
+file (Windows-1252, semicolons, decimal commas, CRLF, an accented category)
+and runs it through `prepare-data` and a real FLAML sweep.
+
+### Testing notes: two ways the camlctl tests first passed for the wrong reason
+
+- The CRLF test captured output in text mode. Python's universal newlines
+  turn `\r\n` into `\n`, so a stray `\r` was invisible, and the test passed
+  with the stripping removed. It now uses a script whose CRLF version can't
+  print the expected line (`fi\r` is a syntax error). A mutation check
+  confirmed it fails without the fix.
+- The `stop` test passed with the SIGTERM step removed, because the SIGKILL
+  fallback cleaned up after 60 s. It now also asserts that `stop` finishes
+  in under 30 s, so it tests the graceful path.
+
 ## Framework-specific gotchas
 
 See each framework's own doc page (`frameworks/<name>.md`) for

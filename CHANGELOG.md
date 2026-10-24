@@ -5,6 +5,67 @@ All notable changes to CAML. The format follows
 [Semantic Versioning](https://semver.org/). The day-by-day engineering record
 is in [STATUS.md](STATUS.md) and [CLAUDE.md](CLAUDE.md).
 
+## [1.1.0] - 2026-10-24
+
+Drive CAML from Windows, macOS or Linux, with AI agents in mind. CAML itself
+still runs only on the Ubuntu 24.04 server.
+
+### Added
+
+- **`camlctl`** (`scripts/camlctl`, installed to `/usr/local/bin`): one
+  server command for every operator OS, `ssh caml-vps camlctl <plain
+  words>`, with no nested quoting.
+  - `setup` installs CAML on a fresh server.
+  - `caml` runs `uv run caml` as the `caml` user, in the repo.
+  - `install` installs several frameworks and keeps going past failures.
+  - `dataset` takes in an upload: SHA-256, encoding, separator, rows, and
+    converting Windows-1252 or Mac Roman exports.
+  - `script` runs an uploaded script, with CRLF stripped.
+  - `start`, `jobs`, `logs`, `wait` and `stop` manage detached jobs, with
+    recorded exit codes.
+  - `status` shows health and sweep progress on one screen.
+  - `bundle` packs the results for `scp`.
+  - `tabpfn-token` stores the key without it passing through chat.
+  - `info`, `update` and `version`.
+  - Reference: `skills/caml-benchmark/references/camlctl.md`.
+- **Operator profiles** for Windows (PowerShell, Git Bash, WSL), macOS and
+  Linux (`skills/caml-benchmark/references/operator-*.md`): how to detect
+  the OS and shell, the SSH setup, the local commands, and each OS's
+  gotchas. The skill's new Phase 1 sends the agent to the right one.
+- **Three copy-paste prompts** (Windows, macOS, Linux) in the README and in
+  `docs/getting-started/agent-prompt.md`, which now also covers the
+  10-minute setup on each OS.
+- **Field reports**: every prompt has the agent keep
+  `caml-field-report-<os>.md`, a detailed record of each problem, fix and
+  gotcha it hit (template: `references/field-report.md`). Users send it
+  back through the new "Field report" issue template.
+- CI:
+  - `server-e2e` runs the whole agent flow as root over SSH on Ubuntu
+    24.04 (`tests/e2e/agent_flow.sh`). It feeds a Windows-1252 Excel-style
+    export through to a real FLAML sweep, a bundle and a stop.
+  - `operator-windows` checks the Windows profile under PowerShell 5.1 and
+    7.
+  - The macOS and Linux jobs run `tests/operator/posix.sh`.
+  - shellcheck covers the server and operator scripts.
+- `tests/test_camlctl.py` (33 tests) and `tests/test_agent_docs.py`, which
+  lints every documented `ssh` command for cross-shell safety and keeps the
+  prompts and version strings in sync.
+
+### Fixed
+
+- **CRLF from Windows clones**: with Git for Windows' default
+  `core.autocrlf=true`, both the checkout and `git archive` turned the
+  server scripts into CRLF, which bash on the server rejects. A new
+  `.gitattributes` keeps LF everywhere.
+
+### Changed
+
+- `bootstrap_vps.sh` installs `camlctl`; `provision_vps.sh` ships it;
+  `sync_vps.sh` refreshes it; `setup_workspace.sh` accepts `CAML_REF`.
+- The skill, README, VPS and TabPFN docs now drive the server through
+  `camlctl`. The TabPFN key is stored with `ssh -t caml-vps camlctl
+  tabpfn-token`.
+
 ## [1.0.1] - 2026-10-24
 
 ### Fixed
@@ -89,5 +150,6 @@ First public release, under the Apache License 2.0.
   theme, plus `AGENTS.md`, `CITATION.cff`, `CONTRIBUTING.md`, `SECURITY.md`
   and CI.
 
+[1.1.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.1.0
 [1.0.1]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.1
 [1.0.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.0

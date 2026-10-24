@@ -1,5 +1,12 @@
 # CLI reference
 
+These are the `caml` commands, run on the server as the `caml` user, in the
+repo. From your own machine (Windows, macOS or Linux), run any of them as
+`ssh <host> camlctl caml <command> ...`. `camlctl` is the server-side
+wrapper that also sets up the server, detaches long jobs, reports status,
+takes in datasets and bundles results:
+[its reference](https://github.com/A1i-Tabatabaei/CAML/blob/main/skills/caml-benchmark/references/camlctl.md).
+
 All commands: `uv run caml <command> [options]`, run from the CAML repo root
 (or anywhere under it — `find_repo_root()` walks upward looking for
 `pyproject.toml`+`frameworks/`+`resources/`).

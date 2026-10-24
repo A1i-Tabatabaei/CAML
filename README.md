@@ -8,6 +8,7 @@
   <a href="#frameworks"><img alt="11 framework integrations verified" src="https://img.shields.io/badge/frameworks-11%20verified-7A3CE0"></a>
   <a href="pyproject.toml"><img alt="Python 3.11 | 3.12" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-0E9E6B"></a>
   <a href="#run-it-on-a-vps"><img alt="Ubuntu 24.04" src="https://img.shields.io/badge/runs%20on-Ubuntu%2024.04-C9740A"></a>
+  <a href="#for-ai-agents"><img alt="Driven from Windows, macOS or Linux" src="https://img.shields.io/badge/driven%20from-Windows%20%7C%20macOS%20%7C%20Linux-2F6FDE"></a>
   <a href="https://github.com/astral-sh/uv"><img alt="Environments by uv" src="https://img.shields.io/badge/envs-uv-D23F72"></a>
   <a href="https://github.com/A1i-Tabatabaei/CAML/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/A1i-Tabatabaei/CAML/actions/workflows/ci.yml/badge.svg"></a>
 </p>
@@ -79,7 +80,7 @@ datasets, paired per task and never per fold.
 <td valign="top">
 
 **Ready for AI agents**<br>
-A bundled <a href="skills/caml-benchmark/SKILL.md">agent skill</a> walks an AI agent, or a person, through a complete benchmark.
+Copy-paste prompts for Windows, macOS and Linux, a bundled <a href="skills/caml-benchmark/SKILL.md">agent skill</a>, and one quote-free server command, <code>camlctl</code>.
 
 </td>
 </tr>
@@ -88,27 +89,28 @@ A bundled <a href="skills/caml-benchmark/SKILL.md">agent skill</a> walks an AI a
 ## Quick start
 
 CAML runs on an Ubuntu 24.04 server. Framework installs are large (AutoGluon
-alone pulls about 170 packages), so use a VPS, not your laptop. From your
-own machine (Linux, or macOS from 1.0.1):
+alone pulls about 170 packages), so use a VPS, not your laptop. Your own
+machine only sends commands, and the same commands work from **Windows
+(PowerShell or Git Bash), macOS and Linux**:
 
 ```bash
-git clone https://github.com/A1i-Tabatabaei/CAML.git && cd CAML
-scripts/provision_vps.sh root@<your-server>   # apt baseline, uv, a caml user, the workspace, caml doctor
+ssh root@<your-server> "test -d /opt/caml-src || git clone -q https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src"
+ssh root@<your-server> bash /opt/caml-src/scripts/camlctl setup
+ssh root@<your-server> camlctl install FLAML
+ssh root@<your-server> camlctl caml run FLAML --benchmark test --constraint test
+ssh root@<your-server> camlctl caml leaderboard --benchmark test
 ```
 
-Then on the server, as the `caml` user:
-
-```bash
-ssh root@<your-server>
-sudo -iu caml                                  # a shell as the unprivileged caml user
-cd ~/caml-workspace/CAML
-uv run caml install FLAML                      # one framework into its own venv
-uv run caml run FLAML --benchmark test --constraint test   # 3 small OpenML tasks x 2 folds
-uv run caml leaderboard --benchmark test
-```
-
-`caml install --all` installs the whole roster. [Run it on a VPS](#run-it-on-a-vps)
-covers sizing and the manual route.
+`camlctl setup` installs the apt baseline, uv, an unprivileged `caml` user
+and the workspace, and ends with `caml doctor`. `camlctl install FLAML` puts
+one framework in its own venv. The `test` benchmark is 3 small OpenML tasks
+× 2 folds. `camlctl` is the one server command
+([reference](skills/caml-benchmark/references/camlctl.md)): it runs `caml` as
+the `caml` user, detaches long jobs (`camlctl start`), and reports progress
+(`camlctl status`). `camlctl install --all` installs the whole roster.
+[Run it on a VPS](#run-it-on-a-vps) covers sizing and the other routes. To
+hand the whole job to an AI agent, copy a prompt from
+[For AI agents](#for-ai-agents).
 
 ## Benchmark your own data
 
@@ -117,14 +119,24 @@ covers sizing and the manual route.
        alt="Workflow: your data (one CSV, TSV or Parquet file plus the target column) is copied to your Ubuntu VPS with scp. There, caml prepare-data writes stratified folds and checks the task type, caml install --all builds one uv venv per framework, caml sweep runs one job per framework and fold (resumable, failures kept), and caml leaderboard ranks frameworks by mean score with Markdown output for reports.">
 </p>
 
+From your machine, with `<host>` your server (or an SSH alias for it):
+
 ```bash
-scp churn.csv root@<your-server>:/tmp/            # then, on the server as the caml user:
-uv run caml prepare-data /tmp/churn.csv --target churned --drop customer_id
-uv run caml install --all
-uv run caml sweep AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML \
-    --benchmark input/datasets/churn/churn.yaml --constraint quick
-uv run caml leaderboard --benchmark input/datasets/churn/churn.yaml
+scp churn.csv root@<host>:churn.csv
+ssh root@<host> camlctl dataset churn.csv
+ssh root@<host> camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id
+ssh root@<host> camlctl start install install AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML
+ssh root@<host> camlctl start sweep caml sweep AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML --benchmark input/datasets/churn/churn.yaml --constraint quick
+ssh root@<host> camlctl status
+ssh root@<host> camlctl caml leaderboard --benchmark input/datasets/churn/churn.yaml
 ```
+
+- **`camlctl dataset`** moves the upload into `~caml/data`, prints its SHA-256,
+  encoding, separator, columns and rows, and offers the fix for a non-UTF-8
+  Excel export (`--from-encoding WINDOWS-1252`).
+- **`camlctl start`** runs the installs and the sweep as detached jobs that
+  survive your SSH session; wait for the install job to finish before you
+  start the sweep (`camlctl wait install 540`).
 
 - **`prepare-data`** reads CSV, TSV or Parquet. It writes 5 stratified folds
   by default (`--folds 1` gives a single holdout), drops rows with a missing
@@ -135,7 +147,7 @@ uv run caml leaderboard --benchmark input/datasets/churn/churn.yaml
   `--type`.
 - **`sweep`** runs each (framework, fold) as its own job. Re-running the same
   command resumes, and `--shard 1/2` / `--shard 2/2` split the matrix across
-  two servers. Run it detached; see [docs/operations/sweeps.md](docs/operations/sweeps.md).
+  two servers. Run it detached (`camlctl start`); see [docs/operations/sweeps.md](docs/operations/sweeps.md).
 - **`quick`** gives each job 5 minutes on every core, which is right for a first
   screening. Re-run your top frameworks under `1h8c` before relying on the
   ranking. Wall-clock is about frameworks × folds × (budget + a few minutes).
@@ -249,12 +261,26 @@ the file-by-file provenance of the code adapted from AMLB is in
 | Disk | 50 GB | 150–200 GB SSD |
 | OS | Ubuntu 24.04, root or sudo over SSH | same; no GPU needed |
 
-**One command, from your machine.** The script packages the repo with
-`git archive`, pushes it over SSH, and needs no credentials on the server:
+**From any machine** (Windows, macOS or Linux): clone onto the server and
+let `camlctl` set it up. `--detach` runs it as a job that survives a dropped
+connection, and `wait` blocks until it's done (repeat it while it exits 124):
 
 ```bash
-scripts/provision_vps.sh root@<host>      # idempotent; ends with a green caml doctor
-scripts/sync_vps.sh root@<host>           # later: push code updates, keeps venvs and results
+ssh root@<host> "test -d /opt/caml-src || git clone -q https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src"
+ssh root@<host> bash /opt/caml-src/scripts/camlctl setup --detach
+ssh root@<host> camlctl wait setup 540
+```
+
+`camlctl update` pulls later versions and keeps the venvs and results.
+
+**From a clone, for developers** (Linux, macOS, or Git Bash/WSL on Windows):
+`provision_vps.sh` packages your checkout with `git archive`, pushes it over
+SSH, and needs no credentials on the server. `sync_vps.sh` pushes later code
+changes and keeps the venvs and results.
+
+```bash
+scripts/provision_vps.sh root@<host>
+scripts/sync_vps.sh root@<host>
 ```
 
 <p align="center">
@@ -267,20 +293,20 @@ scripts/sync_vps.sh root@<host>           # later: push code updates, keeps venv
 
 ```bash
 # as root
-git clone https://github.com/A1i-Tabatabaei/CAML.git /tmp/CAML
-bash /tmp/CAML/scripts/bootstrap_vps.sh          # apt baseline, uv, the caml user, swap
-sudo -iu caml bash /tmp/CAML/scripts/setup_workspace.sh   # clones into ~/caml-workspace, uv sync, caml doctor
+git clone https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src
+bash /opt/caml-src/scripts/bootstrap_vps.sh          # apt baseline, uv, the caml user, swap, camlctl
+sudo -iu caml bash /opt/caml-src/scripts/setup_workspace.sh   # clones into ~/caml-workspace, uv sync, caml doctor
 ```
 
 </details>
 
-Before anything else on a new server, check that OpenML answers, because every
-OpenML benchmark downloads its data from there:
-`curl -m 20 https://www.openml.org/api/v1/json/task/3913 | head -c 200`.
-Run long jobs detached so they survive your SSH session:
-`setsid nohup uv run caml sweep ... > sweep.log 2>&1 < /dev/null & disown`.
-When you're done, copy `output/` off the server and delete it; you're billed
-while it exists. More in [the VPS runbook](docs/operations/vps-runbook.md)
+Before anything else on a new server, run `camlctl info`: it checks the OS,
+RAM, disk, and whether PyPI, GitHub, the PyTorch index and OpenML answer
+(every OpenML benchmark downloads its data from there; your own data
+doesn't need it). Run long jobs detached, so they survive your SSH session:
+`camlctl start sweep caml sweep ...`, then `camlctl status`. When you're
+done, `camlctl bundle` packs the results for `scp`. Copy them off and delete
+the server; you're billed while it exists. More in [the VPS runbook](docs/operations/vps-runbook.md)
 and [GPU support](docs/operations/gpu.md) (CAML detects a GPU and uses it
 for TabPFN, AutoGluon and LightAutoML).
 
@@ -291,17 +317,18 @@ Both TabPFN variants need a free Prior Labs API key in `TABPFN_TOKEN`:
 1. Register at [ux.priorlabs.ai](https://ux.priorlabs.ai), accept the
    licenses on the Licenses tab (the TabPFN-3 model license is required by the
    local `TabPFN`), and copy an API key.
-2. On the server, as the `caml` user, store it without it reaching your shell
-   history or the repo:
+2. Store it on the server for the `caml` user. Run this yourself, in your
+   own terminal. It asks for the key without showing it, so the key never
+   reaches your shell history, the repo or an agent's chat:
 
    ```bash
-   read -rsp 'TabPFN token: ' t && printf 'export TABPFN_TOKEN=%q\n' "$t" > ~/.caml-secrets && unset t && chmod 600 ~/.caml-secrets; echo
-   line='[ -f ~/.caml-secrets ] && . ~/.caml-secrets'; grep -qxF "$line" ~/.profile || echo "$line" >> ~/.profile
+   ssh -t root@<host> camlctl tabpfn-token
    ```
 
-   It goes in `~/.profile`, not `~/.bashrc`: Ubuntu's `.bashrc` returns early
-   for non-interactive shells such as `bash -lc '...'`.
-3. `caml install TabPFN` (local) and/or `caml install TabPFNClient` (hosted).
+   It writes the key to `~caml/.caml-secrets` (mode 600), which
+   `~caml/.profile` sources. `camlctl tabpfn-token --check` prints
+   `token-set` or `token-missing`, never the key.
+3. `camlctl install TabPFN` (local) and/or `camlctl install TabPFNClient` (hosted).
 
 | | `TabPFN` (local) | `TabPFNClient` (hosted) |
 |---|---|---|
@@ -350,11 +377,170 @@ final model used, and, for a failed job, the error in `info`.
 
 ## For AI agents
 
+### Hand the whole job to an agent
+
+Copy the prompt for your operating system, fill in **My details**, and paste
+it into your agent: Claude Code, Codex, Cursor, Copilot, or any agent that
+can run commands on your computer. The agent:
+
+- confirms which OS and shell it's in, and reads the matching instructions
+  from this repo;
+- sets up your Ubuntu server over SSH;
+- benchmarks your data, monitors the run, and writes an honest report.
+
+CAML always runs on the Ubuntu server; your computer only sends commands.
+
+You need an Ubuntu 24.04 server with root SSH (the IP and root password
+from your provider), your dataset as CSV or Parquet, and the column to
+predict. The agent can walk you through SSH key setup, or you can do it
+first: [the 10-minute setup](docs/getting-started/agent-prompt.md).
+
+<details>
+<summary><b>Windows: PowerShell, Git Bash or WSL</b></summary>
+
+<!-- prompt:windows -->
+```text
+Benchmark the AutoML frameworks on my dataset with CAML, on my Ubuntu server, and monitor the run until it finishes.
+
+I'm on Windows, and you have a shell on this PC. CAML (https://github.com/A1i-Tabatabaei/CAML) installs each AutoML framework in its own environment on an Ubuntu 24.04 server, runs them all on the same folds of my data, and ranks them. This PC only sends commands over SSH and keeps the reports: install nothing on it.
+
+My details (if anything is blank or unclear, ask me in one message before you touch the server):
+- Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
+- Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
+- Dataset: <full path, e.g. C:\Users\me\Downloads\churn.csv>
+- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
+- Drop: <ID columns and anything only known after the outcome, or "ask me">
+- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
+- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Time budget: <e.g. results within 6 hours>
+- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- Report folder: <e.g. C:\caml-run>
+
+How to work:
+1. Find out which shell you're in (PowerShell, Git Bash, cmd or WSL; operator-windows.md shows how), and confirm this is Windows. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-windows.md (this PC: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
+3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+
+Rules:
+- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
+- My data goes to my server and nowhere else.
+- Creating, resizing or deleting servers, and anything else that costs money, is my call.
+- Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
+- Don't edit CAML's code to make something pass: work around it, and record it in the field report.
+- One sweep at a time on the server.
+- Report honestly: every failed framework or fold, with its reason. Close results are ties.
+
+Field report (required): before your first command, create caml-field-report-windows.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this PC and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on Windows.
+
+Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-windows.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+```
+<!-- /prompt:windows -->
+
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+<!-- prompt:macos -->
+```text
+Benchmark the AutoML frameworks on my dataset with CAML, on my Ubuntu server, and monitor the run until it finishes.
+
+I'm on macOS, and you have a shell on this Mac. CAML (https://github.com/A1i-Tabatabaei/CAML) installs each AutoML framework in its own environment on an Ubuntu 24.04 server, runs them all on the same folds of my data, and ranks them. This Mac only sends commands over SSH and keeps the reports: install nothing on it.
+
+My details (if anything is blank or unclear, ask me in one message before you touch the server):
+- Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
+- Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
+- Dataset: <full path, e.g. /Users/me/Downloads/churn.csv>
+- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
+- Drop: <ID columns and anything only known after the outcome, or "ask me">
+- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
+- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Time budget: <e.g. results within 6 hours>
+- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- Report folder: <e.g. ~/caml-run>
+
+How to work:
+1. Confirm this is macOS (`uname -s` prints Darwin) and note the shell. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-macos.md (this Mac: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
+3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+
+Rules:
+- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
+- My data goes to my server and nowhere else.
+- Creating, resizing or deleting servers, and anything else that costs money, is my call.
+- Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
+- Don't edit CAML's code to make something pass: work around it, and record it in the field report.
+- One sweep at a time on the server.
+- Report honestly: every failed framework or fold, with its reason. Close results are ties.
+
+Field report (required): before your first command, create caml-field-report-macos.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this Mac and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on macOS.
+
+Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-macos.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+```
+<!-- /prompt:macos -->
+
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
+<!-- prompt:linux -->
+```text
+Benchmark the AutoML frameworks on my dataset with CAML, on my Ubuntu server, and monitor the run until it finishes.
+
+I'm on Linux, and you have a shell on this machine. CAML (https://github.com/A1i-Tabatabaei/CAML) installs each AutoML framework in its own environment on an Ubuntu 24.04 server, runs them all on the same folds of my data, and ranks them. This machine only sends commands over SSH and keeps the reports: install nothing on it.
+
+My details (if anything is blank or unclear, ask me in one message before you touch the server):
+- Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
+- Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
+- Dataset: <full path, e.g. /home/me/data/churn.csv>
+- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
+- Drop: <ID columns and anything only known after the outcome, or "ask me">
+- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
+- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Time budget: <e.g. results within 6 hours>
+- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- Report folder: <e.g. ~/caml-run>
+
+How to work:
+1. Confirm this is Linux (`uname -s`), and whether it's WSL. If it isn't Linux, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-linux.md (this machine: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
+3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+
+Rules:
+- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
+- My data goes to my server and nowhere else.
+- Creating, resizing or deleting servers, and anything else that costs money, is my call.
+- Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
+- Don't edit CAML's code to make something pass: work around it, and record it in the field report.
+- One sweep at a time on the server.
+- Report honestly: every failed framework or fold, with its reason. Close results are ties.
+
+Field report (required): before your first command, create caml-field-report-linux.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this machine and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on Linux.
+
+Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-linux.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+```
+<!-- /prompt:linux -->
+
+</details>
+
+Every prompt also has the agent keep a **field report**
+(`caml-field-report-<os>.md`). It records every error, workaround and
+gotcha the agent hit, and what worked first time. Please send it back by
+opening a [field report issue](https://github.com/A1i-Tabatabaei/CAML/issues/new/choose).
+That's how CAML gets better on your OS.
+
+### The agent skill
+
 [`skills/caml-benchmark/`](skills/caml-benchmark/SKILL.md) is an
-[Agent Skill](https://agentskills.io): step-by-step instructions that let an
-AI agent (or a person) take a user's dataset to a finished, honest
-framework comparison. It covers provisioning, data preparation, privacy
-(TabPFNClient), running, monitoring, reporting and cleanup.
+[Agent Skill](https://agentskills.io): the runbook those prompts point to.
+It covers the operator machine (profiles for
+[Windows](skills/caml-benchmark/references/operator-windows.md),
+[macOS](skills/caml-benchmark/references/operator-macos.md) and
+[Linux](skills/caml-benchmark/references/operator-linux.md)), the server
+command [`camlctl`](skills/caml-benchmark/references/camlctl.md),
+provisioning, data preparation, privacy (TabPFNClient), running, monitoring,
+reporting, cleanup and the field report.
 
 ```text
 /plugin marketplace add A1i-Tabatabaei/CAML
@@ -364,13 +550,6 @@ framework comparison. It covers provisioning, data preparation, privacy
 That installs it in Claude Code. For other agents, copy `skills/caml-benchmark/`
 into your agent's skills directory. Agents working inside this repo should
 also read [AGENTS.md](AGENTS.md).
-
-To hand the whole job to an agent, use the ready-made prompt in
-[docs/getting-started/agent-prompt.md](docs/getting-started/agent-prompt.md).
-It covers the 10 minutes of setup on your side (a server, an SSH key and a
-host alias, the dataset), then has the agent provision the VPS, prepare your
-data, run and monitor the sweep, and write the report. It's written for a
-Mac, and works the same from Linux.
 
 ## Command reference
 
@@ -388,6 +567,25 @@ Mac, and works the same from Linux.
 | `caml uninstall <name>` | Removes a framework's venv |
 
 Every flag, with examples: [docs/reference/cli.md](docs/reference/cli.md).
+
+From your own machine, these run through `camlctl` on the server
+(`ssh <host> camlctl caml <command> ...`). `camlctl`'s own commands are:
+
+| `camlctl` command | What it does |
+|---|---|
+| `info` | Server facts and network checks, with warnings |
+| `setup [--detach]` | Installs CAML on a fresh Ubuntu 24.04 server; idempotent |
+| `caml ARGS...` | Runs `uv run caml ARGS...` as the `caml` user, in the repo |
+| `install FW...` | Installs several frameworks, keeping going past failures |
+| `dataset FILE` | Takes in an uploaded data file and describes it; converts non-UTF-8 exports |
+| `script FILE` | Runs an uploaded bash or Python script as `caml` (CRLF-safe) |
+| `start JOB ...`, `jobs`, `logs`, `wait`, `stop` | Detached jobs that survive SSH drops |
+| `status` | Load, memory, disk, OOM kills, jobs and sweep progress on one screen |
+| `bundle` | Packs results, prepared datasets and logs into one `.tar.gz` for `scp` |
+| `tabpfn-token` | Stores the TabPFN key without it passing through chat |
+| `update`, `version` | Updates the code; shows versions |
+
+The full reference: [camlctl.md](skills/caml-benchmark/references/camlctl.md).
 
 ## Project status
 
@@ -428,7 +626,7 @@ repository"** button uses [CITATION.cff](CITATION.cff).
   author  = {Tabatabaei, Ali},
   title   = {{CAML}: Benchmarking open-source AutoML frameworks in isolated environments},
   year    = {2026},
-  version = {1.0.1},
+  version = {1.1.0},
   url     = {https://github.com/A1i-Tabatabaei/CAML},
   license = {Apache-2.0}
 }

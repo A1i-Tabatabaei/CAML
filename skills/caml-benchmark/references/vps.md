@@ -1,8 +1,11 @@
 # Running CAML on a VPS
 
 CAML is built for one Ubuntu 24.04 server: bare-metal `uv` venvs, no
-Docker. This page covers getting a server, provisioning it, running commands
-on it reliably, and shutting it down.
+Docker. The user's own machine (Windows, macOS or Linux) only drives it
+over SSH. This page covers getting a server, setting it up, running commands
+on it reliably, and shutting it down. The per-OS details of the user's side
+are in the operator profiles: [Windows](operator-windows.md),
+[macOS](operator-macos.md), [Linux](operator-linux.md).
 
 ## Choosing a server
 
@@ -14,99 +17,93 @@ on it reliably, and shutting it down.
 - **Sizing**: 8 vCPU / 32 GB RAM / 150 GB SSD runs the full roster on
   datasets up to roughly 100k rows × 100 columns. 4 vCPU / 16 GB / 80 GB is
   enough for small data or a handful of frameworks. Below 8 GB of RAM,
-  `bootstrap_vps.sh` adds a 4 GB swapfile, and H2O, AutoGluon and FEDOT
-  will still hit out-of-memory kills on real data.
+  setup adds a 4 GB swapfile, and H2O, AutoGluon and FEDOT will still hit
+  out-of-memory kills on real data.
 - **A GPU is optional.** CAML detects one with `nvidia-smi` and installs CUDA
   wheels for TabPFN, AutoGluon and LightAutoML. GPU runs are not yet
   verified end to end; see `docs/operations/gpu.md`.
-- **Network**: the server must reach `pypi.org`, `download.pytorch.org`,
-  `github.com` and `www.openml.org`.
+- **Network**: the server must reach `pypi.org`, `download.pytorch.org` and
+  `github.com`, plus `www.openml.org` for the OpenML benchmarks.
+  `camlctl info` checks all four.
 
-The user creates the server, because it costs money. Ask them for the host
-(IP or name) and confirm that SSH key login works.
+The user creates the server, because it costs money. They give it a host
+alias, `caml-vps`, with key login as root (their profile's SSH section).
+Never ask the user to type a password into the chat.
 
-## SSH access (the user does this part)
+If the provider only gives a sudo user (for example `ubuntu`), that works
+too, as long as sudo needs no password: `camlctl` re-runs itself with
+`sudo -n`. Put that user in the alias's `User` line. Files then go to that
+user's home, and `camlctl dataset` and `camlctl bundle` take it from there.
 
-If the user has no SSH key yet, they run this on their own machine:
+## Setup
 
-```bash
-ssh-keygen -t ed25519               # accept the defaults
-ssh-copy-id root@HOST               # asks for the server's root password once
-ssh -o BatchMode=yes root@HOST true && echo "key login works"
-```
-
-On a Mac, if `ssh-copy-id` is missing, append the key by hand:
-`cat ~/.ssh/id_ed25519.pub | ssh root@HOST 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'`.
-If the key has a passphrase, store it in the macOS keychain once
-(`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`), so an agent's
-non-interactive `ssh` works without a prompt.
-
-Never ask the user to type a password into the chat. The committed scripts
-expect key authentication. For non-standard access (another port, a jump
-host or a config alias), set `SSH="ssh -p 2222"` and `SCP="scp -P 2222"` in
-front of the provisioning commands.
-
-`provision_vps.sh` must log in as **root**, because it runs
-`bootstrap_vps.sh` directly. If the provider only gives a sudo user, either
-enable root key login, or use the manual route below with `sudo`.
-
-## Provisioning
-
-From a clone of the CAML repo on the user's machine (Linux, or macOS since
-1.0.1; before that the scripts used GNU-only `mktemp` and `tar` options and
-failed on a Mac):
+From the user's machine, on any OS:
 
 ```bash
-ssh root@HOST 'curl -sS -m 20 https://www.openml.org/api/v1/json/task/3913 | head -c 120; echo'
-scripts/provision_vps.sh root@HOST
+ssh caml-vps "command -v git || (apt-get update -qq && apt-get install -y -qq git)"
+ssh caml-vps "test -d /opt/caml-src || git clone -q https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src"
+ssh caml-vps bash /opt/caml-src/scripts/camlctl info
+ssh caml-vps bash /opt/caml-src/scripts/camlctl setup --detach
+ssh caml-vps camlctl wait setup 540
 ```
 
-It packages the repo (`git archive` of the checked-out commit), pushes it
-over SSH, runs `bootstrap_vps.sh` as root (apt baseline including
-`openjdk-17-jre-headless`, `build-essential` and `swig`; uv; an
-unprivileged `caml` user; swap if RAM is under 8 GB; a sudoers entry that
-lets `caml` run only `apt-get install`), then `setup_workspace.sh` as `caml`
-(the workspace at `~caml/caml-workspace/CAML`, `uv sync`, `caml doctor`). It is
-idempotent: re-running it is safe.
+`setup` runs `bootstrap_vps.sh` as root (an apt baseline including
+`openjdk-17-jre-headless`, `build-essential` and `swig`; uv; an unprivileged
+`caml` user; swap if RAM is under 8 GB; a sudoers entry that lets `caml` run
+only `apt-get install`; `/usr/local/bin/camlctl`). It then runs
+`setup_workspace.sh` as `caml`: a clone at `~caml/caml-workspace/CAML`,
+`uv sync`, `caml doctor`. It's idempotent, so re-running it is safe. Pin a
+release with `setup --ref v1.1.0`.
 
-**Manual route** (run on the server as root):
+**From a clone, for developers** (Linux, macOS since 1.0.1, Git Bash or WSL
+on Windows): `scripts/provision_vps.sh caml-vps` packages the checked-out
+commit with `git archive` and pushes it over SSH, so the server needs no
+GitHub access. `INCLUDE_WORKTREE=1` packages uncommitted changes too.
+`scripts/sync_vps.sh caml-vps` pushes later changes and keeps the venvs and
+results. It refuses to run while a `caml run` or `caml sweep` is active. A
+workspace deployed this way has no `.git`, so `camlctl update` sends you back
+to `sync_vps.sh`.
+
+**By hand on the server** (as root):
 
 ```bash
-git clone https://github.com/A1i-Tabatabaei/CAML.git /tmp/CAML
-bash /tmp/CAML/scripts/bootstrap_vps.sh
-sudo -iu caml bash /tmp/CAML/scripts/setup_workspace.sh
+git clone https://github.com/A1i-Tabatabaei/CAML.git /opt/caml-src
+bash /opt/caml-src/scripts/camlctl setup
 ```
-
-**Updating the code later** without losing installed frameworks or
-results: `scripts/sync_vps.sh root@HOST` from the user's clone. It refuses to
-run while a `caml run` or `caml sweep` is active on the server.
 
 ## Running commands on the server
 
-Everything runs as `caml`, from the repo root (CAML finds its root from the
-current directory):
+Every command goes through camlctl ([camlctl.md](camlctl.md)):
 
 ```bash
-ssh root@HOST "sudo -iu caml bash -lc 'cd ~/caml-workspace/CAML && uv run caml status'"
+ssh caml-vps camlctl caml status
+ssh caml-vps camlctl start sweep caml sweep FLAML --benchmark input/datasets/churn/churn.yaml --constraint quick
+ssh caml-vps camlctl status
 ```
 
 Rules that have prevented real failures in this project:
 
-- **Write anything longer than one command to a script file**, `scp` it over,
-  and run the file. Long multi-line strings nested inside `ssh "..."` and
-  `bash -lc '...'` have repeatedly broken on quoting.
-- **Detach anything that takes more than a few minutes.** An SSH session
-  that drops kills its foreground command:
-
-  ```bash
-  setsid nohup bash ~/run_sweep.sh > ~/sweep.log 2>&1 < /dev/null & disown
-  ```
-
+- **Plain words only.** No nested quotes through ssh. Commands like
+  `ssh HOST "sudo -iu caml bash -lc 'cd ... && uv run caml ...'"` broke
+  repeatedly on quoting, and in different ways in PowerShell, cmd, zsh and
+  bash. When you need a raw shell command, use one pair of double quotes,
+  with no `$`, backtick, `%`, `!` or `"` inside.
+- **Write anything longer than one command to a script file**, `scp` it
+  over, and run it with `camlctl script FILE`. It runs as `caml` in the
+  repo, and strips Windows line endings.
+- **Detach anything that takes more than a few minutes** with
+  `camlctl start JOB ...`. An SSH session that drops kills its foreground
+  command, and agent shell tools time out. Then watch it with
+  `camlctl wait JOB 540` or `camlctl status`.
 - **Run one sweep per server.** Two drivers competing for CPU change what
   each framework achieves within its time budget, and two drivers on the
   same sweep are refused by its lock anyway.
-- **Watch memory** while the first jobs run: `free -h`, and after a `killed`
-  job, `dmesg -T | grep -i -E 'killed process|oom'`.
+- **Watch memory** while the first jobs run: `camlctl status` shows
+  available memory, swap and OOM kills since boot.
+
+A person at a terminal can still work interactively:
+`ssh caml-vps`, then `sudo -iu caml`, `cd ~/caml-workspace/CAML` and
+`uv run caml ...`.
 
 ## Several servers
 
@@ -114,22 +111,26 @@ Rules that have prevented real failures in this project:
 same command with `--shard 1/2` on one server and `--shard 2/2` on the other.
 Use identical server types, since timings aren't comparable across
 different CPUs. Each server writes its own `output/results.csv`, and there
-is no merge command yet (known issue KI-02). Copy both files back and
-concatenate them:
+is no merge command yet (known issue KI-02). Bundle both, unpack them, and
+concatenate the two `results.csv` files on the server or anywhere with
+pandas:
 
-```bash
-uv run python -c "import pandas as pd, sys; pd.concat([pd.read_csv(f) for f in sys.argv[1:]]).to_csv('merged-results.csv', index=False)" a/results.csv b/results.csv
+```python
+import pandas as pd
+pd.concat([pd.read_csv("a/output/results.csv"), pd.read_csv("b/output/results.csv")]).to_csv("merged-results.csv", index=False)
 ```
 
 To rank the merged file, put it at `output/results.csv` in a scratch copy
-of the repo and run `caml leaderboard` there.
+of the repo on one server and run `caml leaderboard` there.
 
 ## Getting results off and shutting down
 
 ```bash
-scp -r root@HOST:/home/caml/caml-workspace/CAML/output ./caml-output     # from the user's machine
+ssh caml-vps camlctl bundle my-results
+scp caml-vps:caml-bundles/my-results.tar.gz .
 ```
 
-Then remind the user to delete the server in their provider's console; it
-bills until then. `scripts/teardown_workspace.sh root@HOST` only wipes the
+Unpack it with `tar -xzf my-results.tar.gz` (Windows' `tar.exe` too). Then
+remind the user to delete the server in their provider's console; it bills
+until then. `scripts/teardown_workspace.sh caml-vps` only wipes the
 workspace for a clean reinstall. It does not stop the billing.

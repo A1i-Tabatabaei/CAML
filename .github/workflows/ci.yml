@@ -22,12 +22,16 @@ jobs:
       - name: Tests
         run: uv run pytest -q
       - name: Lint the modules added in 1.0
-        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py tests/test_lib_package.py
+        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py tests/test_lib_package.py tests/test_camlctl.py tests/test_agent_docs.py
+      - name: Shellcheck the server and operator scripts
+        run: shellcheck -S warning scripts/camlctl scripts/bootstrap_vps.sh scripts/setup_workspace.sh scripts/provision_vps.sh scripts/sync_vps.sh scripts/lib_package.sh scripts/teardown_workspace.sh tests/e2e/agent_flow.sh tests/operator/posix.sh
+      - name: Linux operator checks
+        run: bash tests/operator/posix.sh
 
   operator-scripts-macos:
-    # provision_vps.sh and sync_vps.sh run on the user's own machine, often a
-    # Mac: the stock /bin/bash 3.2, BSD mktemp and bsdtar. They failed there
-    # until 2026-10-24 (GNU-only options).
+    # The operator machine can be a Mac: the stock /bin/bash 3.2, zsh, BSD
+    # mktemp and bsdtar. provision_vps.sh and sync_vps.sh failed there until
+    # 2026-10-24 (GNU-only options).
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -36,3 +40,51 @@ jobs:
       - run: uv sync --locked
       - name: Packaging helper and prepare-data on macOS
         run: uv run pytest -q tests/test_lib_package.py tests/test_prepare.py
+      - name: macOS operator checks (stock bash 3.2)
+        run: /bin/bash tests/operator/posix.sh
+
+  operator-windows:
+    # The operator machine can be Windows: Windows PowerShell 5.1 (what
+    # Windows ships), PowerShell 7, the built-in OpenSSH client and tar.exe.
+    # Checks that a Windows checkout keeps LF in everything that runs on the
+    # server, and that operator-windows.md's commands do what it says.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\operator\windows.ps1
+      - name: PowerShell 7
+        shell: pwsh
+        run: .\tests\operator\windows.ps1
+
+  server-e2e:
+    # The whole agent flow as root on Ubuntu 24.04, over real SSH: camlctl
+    # setup (bootstrap + workspace from this commit), a Windows-1252 Excel
+    # export through camlctl dataset, prepare-data, a FLAML install and a
+    # 2-fold sweep as detached jobs, status, leaderboard, bundle and stop.
+    # The runner plays the VPS: sshd on 127.0.0.1 as the alias caml-vps.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: sshd on localhost as caml-vps (root, key login)
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server
+          sudo systemctl start ssh
+          install -d -m 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -q -f ~/.ssh/caml_e2e
+          sudo install -d -m 700 /root/.ssh
+          sudo install -m 600 ~/.ssh/caml_e2e.pub /root/.ssh/authorized_keys
+          printf '%s\n' 'Host caml-vps' '  HostName 127.0.0.1' '  User root' '  IdentityFile ~/.ssh/caml_e2e' \
+            '  StrictHostKeyChecking accept-new' '  ServerAliveInterval 30' '  ServerAliveCountMax 6' >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          ssh -o BatchMode=yes caml-vps echo ok
+      - name: Agent flow (tests/e2e/agent_flow.sh)
+        run: bash tests/e2e/agent_flow.sh caml-vps
+      - name: Job logs on failure
+        if: failure()
+        run: |
+          sudo bash -c 'for f in /var/lib/camlctl/jobs/*.log; do echo "=== $f"; tail -n 80 "$f"; done' || true

@@ -20,8 +20,8 @@
 #      (Files deleted locally are NOT deleted on the box -- harmless for
 #      stale .py files nothing imports; re-provision from scratch if that
 #      ever matters.)
-#   4. runs `uv sync` (picks up orchestrator dependency changes) and prints
-#      the deployed revision.
+#   4. runs `uv sync` (picks up orchestrator dependency changes), prints
+#      the deployed revision, and refreshes /usr/local/bin/camlctl.
 #
 # Usage:
 #   scripts/sync_vps.sh root@<host>
@@ -70,5 +70,6 @@ echo "==> packaged $([[ "$INCLUDE_WORKTREE" == 1 ]] && echo 'working tree' || ec
 $SCP -q "$ARCHIVE_LOCAL" "$TARGET:/tmp/caml-sync.tar.gz"
 $SSH "$TARGET" "chmod 0644 /tmp/caml-sync.tar.gz && \
   sudo -iu caml bash -lc 'cd ~/caml-workspace && tar xzf /tmp/caml-sync.tar.gz && cd CAML && uv sync -q && cat REVISION' && \
-  rm -f /tmp/caml-sync.tar.gz"
+  rm -f /tmp/caml-sync.tar.gz && \
+  if [ -f /home/caml/caml-workspace/CAML/scripts/camlctl ]; then install -m 0755 /home/caml/caml-workspace/CAML/scripts/camlctl /usr/local/bin/camlctl; fi"
 echo "==> synced. Deployed revision shown above."

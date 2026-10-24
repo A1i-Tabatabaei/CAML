@@ -41,25 +41,28 @@ up as failed folds and why.
 
 ## 3. Store it on the server, outside chat and git
 
-The user runs this on the server as the `caml` user (`sudo -iu caml`). It
-prompts silently, so the token never appears on screen, in shell history or
-in the conversation:
+The user runs this themselves, from their own terminal (PowerShell, Windows
+Terminal, macOS Terminal or a Linux terminal; not through the agent's shell
+tool, because it needs a real terminal). It prompts silently, so the token
+never appears on screen, in shell history or in the conversation:
 
 ```bash
-read -rsp 'TabPFN token: ' t && printf 'export TABPFN_TOKEN=%q\n' "$t" > ~/.caml-secrets && unset t && chmod 600 ~/.caml-secrets; echo
-line='[ -f ~/.caml-secrets ] && . ~/.caml-secrets'; grep -qxF "$line" ~/.profile || echo "$line" >> ~/.profile
+ssh -t caml-vps camlctl tabpfn-token
 ```
 
-Why `~/.profile`: the commands in this skill run through `bash -lc`, a login
-shell, which reads `~/.profile`. Ubuntu's default `~/.bashrc` returns early
-for non-interactive shells, so an `export` at its end would be silently
-skipped.
+It writes `export TABPFN_TOKEN=...` to `~caml/.caml-secrets` (mode 600) and
+sources that file from `~caml/.profile`. That's `~/.profile`, not
+`~/.bashrc`, because camlctl runs commands in a login shell, which reads
+`~/.profile`, and Ubuntu's default `~/.bashrc` returns early for
+non-interactive shells.
 
 **Check**, without printing the token:
 
 ```bash
-ssh root@HOST "sudo -iu caml bash -lc 'test -n \"\$TABPFN_TOKEN\" && echo token-set || echo token-missing'"
+ssh caml-vps camlctl tabpfn-token --check
 ```
+
+It prints `token-set` or `token-missing`.
 
 If the user pasted a token into a chat, a log or a file by mistake, tell
 them to revoke it and create a new one on ux.priorlabs.ai.
@@ -67,10 +70,13 @@ them to revoke it and create a new one on ux.priorlabs.ai.
 ## 4. Install and smoke-test
 
 ```bash
-uv run caml install TabPFN               # local (pulls a CPU torch wheel, or CUDA on a GPU box)
-uv run caml run TabPFN --benchmark test --constraint test
-uv run caml install TabPFNClient         # only if the user agreed to the upload
+ssh caml-vps camlctl install TabPFN
+ssh caml-vps camlctl start tabpfn-smoke caml run TabPFN --benchmark test --constraint test
+ssh caml-vps camlctl install TabPFNClient
 ```
+
+The first installs the local model (a CPU torch wheel, or CUDA on a GPU
+box). Install `TabPFNClient` only if the user agreed to the upload.
 
 The first local run downloads the weights to `~/.cache/tabpfn` (once). A
 missing or placeholder token fails fast, with an error that names

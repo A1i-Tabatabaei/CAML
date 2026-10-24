@@ -102,11 +102,13 @@ uv run caml sweep <frameworks...> --benchmark openml/s/271 --constraint 1h8c --s
 
 **On a VPS, always launch a sweep detached**: it runs for hours or days, and
 an SSH session dying kills an undetached command (a real failure, see
-troubleshooting 2026-07-31). Put the command in a script file and launch
-it with `setsid nohup bash run_sweep.sh > sweep.out 2>&1 < /dev/null &
-disown`; don't use inline multi-line SSH strings, which have repeatedly
-mangled in this project. Check progress with `--dry-run` or by tailing the
-ledger.
+troubleshooting 2026-07-31). Since 1.1.0, from any operator machine:
+`ssh <host> camlctl start sweep caml sweep <frameworks...> --benchmark B
+--constraint C`, then `camlctl status` (progress line and the `--dry-run`
+status table), `camlctl wait sweep 540` and `camlctl logs sweep`. On the box
+itself, the equivalent is a script launched with `setsid nohup bash
+run_sweep.sh > sweep.out 2>&1 < /dev/null & disown`. Don't use inline
+multi-line SSH strings, which have repeatedly mangled in this project.
 
 ## Before launching: preconditions
 

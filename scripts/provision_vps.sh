@@ -72,6 +72,7 @@ $SSH "$TARGET" "mkdir -p $REMOTE_TMP"
 $SCP -q "$ARCHIVE_LOCAL"            "$TARGET:$REMOTE_TMP/caml.tar.gz"
 $SCP -q scripts/bootstrap_vps.sh   "$TARGET:$REMOTE_TMP/bootstrap_vps.sh"
 $SCP -q scripts/setup_workspace.sh "$TARGET:$REMOTE_TMP/setup_workspace.sh"
+$SCP -q scripts/camlctl            "$TARGET:$REMOTE_TMP/camlctl"   # bootstrap_vps.sh installs it
 
 echo "==> [2/3] running bootstrap_vps.sh as root"
 $SSH "$TARGET" "bash $REMOTE_TMP/bootstrap_vps.sh"
@@ -83,5 +84,7 @@ $SSH "$TARGET" "install -m 0644 $REMOTE_TMP/caml.tar.gz /tmp/caml.tar.gz && \
                 sudo -iu caml env CAML_SRC=/tmp/caml.tar.gz bash /tmp/setup_workspace.sh"
 
 echo
-echo "Provisioning complete. The box is ready. To install + smoke-test a framework:"
-echo "  $SSH $TARGET \"sudo -iu caml bash -lc 'cd ~/caml-workspace/CAML && uv run caml install flaml && uv run caml run flaml --benchmark test --constraint test'\""
+echo "Provisioning complete. Drive the box with camlctl, e.g.:"
+echo "  $SSH $TARGET camlctl info"
+echo "  $SSH $TARGET camlctl install FLAML"
+echo "  $SSH $TARGET camlctl caml run FLAML --benchmark test --constraint test"

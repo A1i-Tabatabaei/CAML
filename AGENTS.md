@@ -41,3 +41,15 @@ constraints live in `resources/`.
    verified.
 6. Match the surrounding code's style. Ported AMLB files keep their
    attribution headers.
+7. **Keep the agent docs runnable from every OS.** Operators run Windows,
+   macOS or Linux; CAML runs only on the Ubuntu server, driven by
+   `scripts/camlctl`. A server command in the docs is
+   `ssh <host> camlctl <plain words>`, or one pair of double quotes with no
+   `$`, backtick, `%`, `!` or `"` inside. `tests/test_agent_docs.py`
+   enforces this, and keeps the three prompts (README and
+   `docs/getting-started/agent-prompt.md`) identical. Per-OS details belong
+   in `skills/caml-benchmark/references/operator-*.md`. Server-side scripts
+   must keep LF line endings (`.gitattributes`).
+8. **Field reports** (`caml-field-report-<os>.md`, from users' agents) are
+   bug reports: fold each problem into the code, the operator profiles,
+   troubleshooting and known-issues.

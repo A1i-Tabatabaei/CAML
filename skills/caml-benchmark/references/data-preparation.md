@@ -7,8 +7,10 @@
   **CSV UTF-8**. Since 1.0.1, `prepare-data` detects a `;`, tab or `|`
   separator from the header line, reads decimal commas (`1,5`) in
   semicolon files, and says so in a `WARNING` line. A file that isn't UTF-8
-  (an older "CSV (Comma delimited)" or Mac Roman export) is refused with
-  the `iconv` command that converts it.
+  (Excel's plain "CSV (Comma delimited)" on Windows is Windows-1252; old Mac
+  exports are Mac Roman) is refused with the `iconv` command that converts
+  it. `camlctl dataset` spots this as soon as the file is uploaded, and
+  converts it with `--from-encoding` (below).
 - **One target column.** Classification targets can be text (`yes`/`no`,
   `gold`/`silver`/`bronze`) or integers. Regression targets must be numeric.
 - **Leave the features raw.** Don't impute, scale, one-hot encode or select
@@ -31,10 +33,37 @@
   least one framework (FEDOT). Map them to two words (`yes`/`no`) first.
   `prepare-data` warns about this.
 
-## `caml prepare-data`
+## Getting the file onto the server: `camlctl dataset`
+
+Upload it under a simple name (no spaces), then hand it to `camlctl`:
 
 ```bash
-uv run caml prepare-data DATA_FILE --target COLUMN [options]
+scp "/path/on/your/machine/My Data.csv" caml-vps:churn.csv
+ssh caml-vps camlctl dataset churn.csv
+```
+
+It moves the file to `/home/caml/data/` (owned by `caml`, mode 600) and
+prints `key: value` lines: `sha256` (compare it with the hash of the local
+file; the operator profiles show the command for each OS), `encoding`,
+`line_endings`, `separator`, `columns`, `rows`, `header`, and finally
+`status`:
+
+| `status` | Meaning | Do |
+|---|---|---|
+| `ok` | UTF-8 text, or Parquet | Continue with the `next:` command |
+| `needs-conversion` | Not UTF-8 | Ask the user which program exported it, then run the `fix:` command: `--from-encoding WINDOWS-1252` for Excel on Windows, `MACINTOSH` for old Mac exports. The original is kept as `NAME.orig`. |
+| `unsupported` | An Excel workbook (zip) | Ask the user for a CSV UTF-8 export |
+
+It refuses to overwrite a different file of the same name (exit 3) unless
+you add `--replace`.
+
+## `caml prepare-data`
+
+Run it on the server, through camlctl (the YAML it writes holds absolute
+server paths):
+
+```bash
+ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id --name churn --folds 5
 ```
 
 | Option | Default | Meaning |
@@ -125,9 +154,12 @@ the chosen metric.
 - **Rows are grouped** (several rows per patient, customer or device): one
   group's rows must not appear in both train and test.
 
-Split the data yourself (for example, train on rows before a cutoff date and
-test on rows after it, or use scikit-learn's `GroupKFold`), write each fold
-as a pair of CSV files with identical columns, and create the YAML:
+Split the data yourself, on the server, with a short Python script (for
+example, train on rows before a cutoff date and test on rows after it, or
+use scikit-learn's `GroupKFold`). Write it on your machine, `scp` it over,
+and run it with `ssh caml-vps camlctl script split.py`: it runs as `caml`
+in the repo, with pandas and scikit-learn available. Write each fold as a
+pair of CSV files with identical columns, and create the YAML:
 
 ```yaml
 ---

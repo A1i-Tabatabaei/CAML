@@ -5,16 +5,30 @@ and the ledger's `detail` field. The repo's
 `docs/operations/troubleshooting.md` holds every problem met so far, and
 `docs/operations/known-issues.md` the open ones (cited below as KI-nn).
 
+## Your machine and SSH
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ssh -o BatchMode=yes caml-vps echo ok` asks for a password, or says `Permission denied (publickey)` | No key login yet | The SSH section of your OS's operator profile; the user copies the key with the server password |
+| `Bad configuration option: usekeychain` | A Mac's `~/.ssh/config` used on Linux or Windows | Remove `UseKeychain`, or add `IgnoreUnknown UseKeychain` as the first line |
+| ssh on Windows ignores `~/.ssh/config`, or reports garbage in it | Written by Windows PowerShell 5.1's `>` or `Out-File` (UTF-16), or saved as `config.txt` | Recreate it with `Add-Content -Encoding ascii` ([operator-windows.md](operator-windows.md)) |
+| `bash: $'\r': command not found` on the server | A script with Windows CRLF line endings | Run scripts with `camlctl script` (it strips CR). Repo clones keep LF through `.gitattributes`. |
+| A remote command behaves differently from the docs | Your local shell expanded `$`, a backtick or `%` | Use `camlctl`, or one pair of double quotes without those characters |
+| `camlctl: command not found` | Setup hasn't run yet, or it failed before installing camlctl | `ssh caml-vps bash /opt/caml-src/scripts/camlctl setup --detach` |
+| `camlctl must run as root, or as a user with passwordless sudo` | Logged in as a user without passwordless sudo | Log in as root (`User root` in the alias), or ask the user to fix sudo |
+| `camlctl wait` keeps exiting 124 | The job is still running | Keep waiting; `camlctl logs JOB` shows progress |
+| A job shows `lost` | The server rebooted, or the job was SIGKILLed | Start it again with the same arguments; sweeps resume |
+
 ## Setup
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `curl` to `www.openml.org` hangs or times out | The server's network can't reach OpenML, or OpenML is down (KI-07) | Try again later, or use another provider or region. The user's own data doesn't need OpenML, but the `test` smoke benchmark does. |
-| `caml doctor` prints `MISSING` for an apt package | `bootstrap_vps.sh` didn't run, or failed | Re-run `scripts/provision_vps.sh root@HOST` (it's idempotent) |
-| `caml: command not found` | Not using the project's environment | Always `uv run caml ...` from `~/caml-workspace/CAML` |
-| `Incorrect benchmark name or path` | Wrong working directory, or a typo in the YAML path | `cd ~/caml-workspace/CAML`; pass the YAML's full path |
-| `X is not installed -- run caml install X first` | `caml sweep` checks every framework before it starts | `uv run caml install X`, or drop X from the list |
-| `caml install --all` lists failures at the end | One framework's dependencies failed to resolve or build | `uv run caml install X --force` to retry, and read its error. Network errors are usually transient. |
+| `caml doctor` prints `MISSING` for an apt package | `bootstrap_vps.sh` didn't run, or failed | Re-run `camlctl setup --detach` (it's idempotent), and read `camlctl logs setup` |
+| `caml: command not found` | Not using the project's environment | Go through `camlctl caml ...`, which runs `uv run caml` in the repo |
+| `Incorrect benchmark name or path` | A typo in the YAML path | Paths are relative to the repo (`input/datasets/NAME/NAME.yaml`), or absolute |
+| `X is not installed -- run caml install X first` | `caml sweep` checks every framework before it starts | `camlctl install X`, or drop X from the list |
+| `camlctl install` ends with `failed: X` | One framework's dependencies failed to resolve or build | `camlctl install --force X` to retry, and read its error (`camlctl logs install 200`). Network errors are usually transient. |
 | `TABPFN_TOKEN is not set (or is still the placeholder value)` | No token in the job's environment | [tabpfn.md](tabpfn.md) step 3. The export must be in `~/.profile`, not `~/.bashrc`. |
 | `TabPFNLicenseError` | The TabPFN-3 model license wasn't accepted | The user accepts it on ux.priorlabs.ai (Licenses tab) |
 
@@ -22,7 +36,7 @@ and the ledger's `detail` field. The repo's
 
 | Status / message | Cause | What to do |
 |---|---|---|
-| `killed` | Almost always the kernel's out-of-memory killer | As root: `dmesg -T \| grep -i -E 'killed process\|oom'`. Use a bigger server, `--folds 1`, or a row sample. Report it as a memory limit. |
+| `killed` | Almost always the kernel's out-of-memory killer | `camlctl status` counts OOM kills since boot. Use a bigger server, `--folds 1`, or a row sample. Report it as a memory limit. |
 | `timeout` | The framework overran its budget by far (the hard limit is 2 × budget + 20 min) | Report it; check the log tail for a hang |
 | Local TabPFN: refuses more than 1,000 samples on CPU | TabPFN-3's CPU guard (KI-30) | Expected on CPU servers with more than about 1,000 training rows. Use a GPU server, or leave TabPFN out. |
 | TPOT: `No individuals could be evaluated in the initial population` | TPOT's search finished nothing within the budget, or couldn't handle the data (KI-24) | A longer constraint. Otherwise report it. |
@@ -36,8 +50,8 @@ and the ledger's `detail` field. The repo's
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `another caml sweep is already running on ...` | A second driver started on the same sweep | `ps aux \| grep '[c]aml sweep'`. Wait, or stop the old one (`kill -TERM <pid>`); the lock frees itself when the process exits. |
-| The SSH session dropped and the sweep stopped | It wasn't detached | Re-run the same command with `setsid nohup ... & disown`. Finished jobs are skipped. |
+| `another caml sweep is already running on ...` | A second driver started on the same sweep | `camlctl jobs` shows it. Wait, or (with the user's OK) `camlctl stop JOB`; the lock frees itself when the process exits. |
+| The SSH session dropped and the sweep stopped | It ran in the foreground, not as a job | Start it with `camlctl start sweep caml sweep ...` and the same arguments. Finished jobs are skipped. |
 | Scores look different from an earlier run | A different constraint, seed, server or framework version | Compare the `constraint`, `seed`, `version` and `app_version` columns |
 | `leaderboard` shows old results mixed in | `results.csv` keeps everything, from every run | Filter with `--constraint` and `--task`. The leaderboard already keeps only the latest run of each job. |
 | The server is too slow for the matrix | The matrix is too big | Fewer frameworks or folds, `--constraint quick`, or `--shard` across two servers |
