@@ -807,7 +807,18 @@ XDG_STATE_HOME -u XDG_RUNTIME_DIR`): camlctl's `as_caml`,
 `bootstrap_vps.sh` (`as_caml_login`), `provision_vps.sh` and `sync_vps.sh`.
 caml's own `~/.profile` can still set them deliberately.
 `tests/test_camlctl.py::test_caml_user_commands_drop_inherited_xdg_dirs`
-covers it, and the next CI run re-ran the real setup.
+covers it. **Verified** by the next CI run (40082083115, commit `79e39ad`).
+The whole agent flow passed as root over SSH in about 4 minutes:
+- setup took 55 s;
+- the Windows-1252 upload was flagged `needs-conversion`, converted, and
+  re-read as UTF-8 with the semicolon separator and 400 rows;
+- `prepare-data` chose binary;
+- the CRLF helper script ran;
+- FLAML installed as a job, and the 2-fold sweep (60 s budget) ended with
+  both folds `ok` (AUC 0.762 ± 0.026);
+- leaderboard, bundle (43 files), `scp` and unpack all worked;
+- `camlctl stop` ended a job and its child through real sudo in 3 s, with
+  exit 143.
 
 ### Testing notes: two ways the camlctl tests first passed for the wrong reason
 
