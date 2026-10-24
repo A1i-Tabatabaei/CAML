@@ -33,6 +33,7 @@ FAKE_UV = r"""#!/usr/bin/env bash
 printf '%s\n' "$PWD" > "$FAKE_UV_DIR/cwd"
 printf '%s\n' "$@" > "$FAKE_UV_DIR/args"
 printf '%s\n' "${CAMLCTL_JOB:-}" > "$FAKE_UV_DIR/job"
+printf '%s\n' "${XDG_CONFIG_HOME:-unset} ${XDG_CACHE_HOME:-unset}" > "$FAKE_UV_DIR/xdg"
 [[ "$1" == "--version" ]] && { echo "uv 0.0.0-fake"; exit 0; }
 [[ "$1" == "run" ]] && shift
 case "$1 ${2:-}" in
@@ -426,3 +427,10 @@ def test_update_refuses_while_a_job_runs(ctl: Ctl):
     r = ctl("update")
     assert r.returncode == 3 and "mix revisions" in r.stderr
     ctl("stop", "long", timeout=120)
+
+
+def test_caml_user_commands_drop_inherited_xdg_dirs(ctl: Ctl):
+    # sudo's PAM stack re-reads /etc/environment; a global XDG_CONFIG_HOME
+    # there (GitHub's runners) broke the uv installer for caml.
+    ctl("caml", "status", extra_env={"XDG_CONFIG_HOME": "/home/runner/.config", "XDG_CACHE_HOME": "/root/.cache"})
+    assert (ctl.fake / "xdg").read_text().strip() == "unset unset"

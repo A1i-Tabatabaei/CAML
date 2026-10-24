@@ -51,13 +51,18 @@ refresh_paths() {
 
 # Run "$@" in directory $1 as the caml user, with its login environment
 # (uv on PATH, TABPFN_TOKEN from ~/.profile). CAMLCTL_JOB rides along so
-# `camlctl stop` can find every process a job started.
+# `camlctl stop` can find every process a job started. XDG_* variables are
+# dropped: a system-wide XDG_CONFIG_HOME or XDG_CACHE_HOME (GitHub's runners
+# set one) reaches the caml user through sudo and points it at directories
+# it can't write (CI's server-e2e, 2026-10-24). caml's own ~/.profile can
+# still set them.
+XDG_UNSET=(-u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_RUNTIME_DIR)
 as_caml() {
   local dir="$1"; shift
   if [[ "$(id -un)" == "$CAML_USER" ]]; then
-    (cd "$dir" && CAMLCTL_JOB="${CAMLCTL_JOB:-}" "$@")
+    (cd "$dir" && env "${XDG_UNSET[@]}" CAMLCTL_JOB="${CAMLCTL_JOB:-}" "$@")
   else
-    (cd / && sudo -u "$CAML_USER" -H -- env CAMLCTL_JOB="${CAMLCTL_JOB:-}" \
+    (cd / && sudo -u "$CAML_USER" -H -- env "${XDG_UNSET[@]}" CAMLCTL_JOB="${CAMLCTL_JOB:-}" \
       bash -lc 'cd "$1" && shift && exec "$@"' camlctl "$dir" "$@")
   fi
 }

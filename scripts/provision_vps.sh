@@ -81,7 +81,7 @@ echo "==> [3/3] running setup_workspace.sh as the caml user (repo delivered via 
 # Stage the archive + script where the caml user can read them, then run as caml.
 $SSH "$TARGET" "install -m 0644 $REMOTE_TMP/caml.tar.gz /tmp/caml.tar.gz && \
                 install -m 0755 $REMOTE_TMP/setup_workspace.sh /tmp/setup_workspace.sh && \
-                sudo -iu caml env CAML_SRC=/tmp/caml.tar.gz bash /tmp/setup_workspace.sh"
+                sudo -iu caml env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_RUNTIME_DIR CAML_SRC=/tmp/caml.tar.gz bash /tmp/setup_workspace.sh"
 
 echo
 echo "Provisioning complete. Drive the box with camlctl, e.g.:"

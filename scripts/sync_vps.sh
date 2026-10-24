@@ -69,7 +69,7 @@ echo "==> packaged $([[ "$INCLUDE_WORKTREE" == 1 ]] && echo 'working tree' || ec
 
 $SCP -q "$ARCHIVE_LOCAL" "$TARGET:/tmp/caml-sync.tar.gz"
 $SSH "$TARGET" "chmod 0644 /tmp/caml-sync.tar.gz && \
-  sudo -iu caml bash -lc 'cd ~/caml-workspace && tar xzf /tmp/caml-sync.tar.gz && cd CAML && uv sync -q && cat REVISION' && \
+  sudo -iu caml env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_RUNTIME_DIR bash -lc 'cd ~/caml-workspace && tar xzf /tmp/caml-sync.tar.gz && cd CAML && uv sync -q && cat REVISION' && \
   rm -f /tmp/caml-sync.tar.gz && \
   if [ -f /home/caml/caml-workspace/CAML/scripts/camlctl ]; then install -m 0755 /home/caml/caml-workspace/CAML/scripts/camlctl /usr/local/bin/camlctl; fi"
 echo "==> synced. Deployed revision shown above."

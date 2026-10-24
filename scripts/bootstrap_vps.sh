@@ -25,13 +25,22 @@ apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--fo
 
 echo "==> [2/6] uv (Python interpreter + venv/package manager, no apt/PPA involved)"
 CAML_USER="${CAML_USER:-caml}"
+# A login shell as the caml user, without the XDG_* variables root's session
+# may carry. GitHub's runners set XDG_CONFIG_HOME=/home/runner/.config
+# system-wide; it reached the caml user through sudo and sent the uv
+# installer's receipt to a directory caml can't write (CI's server-e2e,
+# 2026-10-24). A server image with XDG variables in /etc/environment would
+# do the same.
+as_caml_login() {
+  sudo -u "$CAML_USER" -H env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_RUNTIME_DIR bash -lc "$1"
+}
 if ! id -u "$CAML_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$CAML_USER"
   echo "Created non-root user '$CAML_USER'. All 'caml install'/'caml run' work should run as this user."
 fi
 
-if ! sudo -u "$CAML_USER" bash -lc 'command -v uv' >/dev/null 2>&1; then
-  sudo -u "$CAML_USER" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+if ! as_caml_login 'command -v uv' >/dev/null 2>&1; then
+  as_caml_login 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 fi
 grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' /etc/profile.d/caml-uv-path.sh 2>/dev/null || \
   echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/caml-uv-path.sh
@@ -69,7 +78,7 @@ fi
 
 echo "==> [6/6] sanity report"
 echo "--- versions ---"
-sudo -u "$CAML_USER" bash -lc 'uv --version' || true
+as_caml_login 'uv --version' || true
 java -version
 gcc --version | head -1
 echo "--- gpu (informational; CPU boxes are fully supported) ---"

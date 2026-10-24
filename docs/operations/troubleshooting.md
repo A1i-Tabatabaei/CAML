@@ -707,10 +707,16 @@ left (setup's first two lines) use one pair of double quotes with no `$`,
 backtick, `%`, `!` or inner `"`, which every one of those shells passes
 through unchanged. `tests/test_agent_docs.py` lints every `ssh <host> ...`
 command in the README, the prompts and the skill against that rule, and
-checks that every `camlctl` subcommand they mention exists. CI's Windows
-job checks, under PowerShell 5.1 and 7, that the documented strings reach a
-native program byte for byte. The POSIX job checks the same under bash and
-zsh.
+checks that every `camlctl` subcommand they mention exists. CI checks that
+the documented strings reach a native program byte for byte. **Verified
+2026-10-24** (CI run 40081658794) on:
+- Windows PowerShell 5.1.26100 and PowerShell 7.6.7 (Windows Server 2025,
+  OpenSSH_for_Windows 9.5p2);
+- macOS 15.7 (stock bash 3.2.57 and zsh);
+- Ubuntu bash.
+
+The same run confirmed the reason for the rule: in PowerShell,
+`"echo $HOME"` reached the program as `echo C:\Users\runneradmin`.
 
 ### CRLF line endings from a Windows clone reach the server
 
@@ -722,21 +728,25 @@ CRLF, and **`git archive` applies the same conversion**. So
 with `$'\r': command not found`.
 **Fix**: `.gitattributes` with `* text=auto eol=lf`. With it, the same
 experiment gives LF both in the checkout and in the archive. CI's
-`operator-windows` job checks both on a real Windows checkout. Scripts an
+`operator-windows` job checks both on a real Windows checkout. **Verified
+2026-10-24** on a runner with `core.autocrlf=true`: every `scripts/*.sh` and
+`scripts/camlctl` kept LF in the checkout and in `git archive`. Scripts an
 agent writes on Windows may still be CRLF, so `camlctl script` strips `\r`
 before running them (`tests/test_camlctl.py`; the test fails without the
 stripping).
 
 ### ssh can't read a config file written by Windows PowerShell 5.1
 
-**Symptom** (expected): `"Host caml-vps ..." > $env:USERPROFILE\.ssh\config`
-or `Out-File` in Windows PowerShell 5.1 writes UTF-16LE with a BOM, which
-OpenSSH doesn't parse. Notepad tends to save a new `config` as
+**Symptom** (verified 2026-10-24 on Windows PowerShell 5.1.26100 with
+OpenSSH_for_Windows 9.5p2): `"Host caml-vps ..." > $env:USERPROFILE\.ssh\config`
+or `Out-File` writes UTF-16LE with a BOM, and `ssh -G` can't read the file.
+PowerShell 7.6 writes UTF-8, which ssh reads. Notepad tends to save a new `config` as
 `config.txt`.
 **Fix**: the docs create it with a here-string piped to
 `Add-Content -Encoding ascii`. CI's Windows job parses that file with
-`ssh -G` under PowerShell 5.1 and 7. It also writes a config the wrong way
-and records what ssh makes of it, so the claim is checked on real Windows.
+`ssh -G` under PowerShell 5.1 and 7 (both pass). It also writes a config the
+wrong way and records what ssh makes of it, which is how the symptom above
+was verified.
 
 ### `UseKeychain` breaks a shared ssh config off macOS
 
@@ -776,6 +786,28 @@ line, and `--from-encoding WINDOWS-1252` (or `MACINTOSH`) converts it,
 keeping the original as `.orig`. CI's server e2e feeds it exactly such a
 file (Windows-1252, semicolons, decimal commas, CRLF, an accented category)
 and runs it through `prepare-data` and a real FLAML sweep.
+
+### Setup failed on its first CI run: an inherited `XDG_CONFIG_HOME` (verified, fixed)
+
+**Symptom** (CI `server-e2e`, run 40081658794, the first time camlctl setup
+ran as root over SSH): `bootstrap_vps.sh` step 2 installed uv into
+`/home/caml/.local/bin`, then died with `mkdir: cannot create directory
+'/home/runner': Permission denied` and `ERROR: unable to create receipt
+directory at /home/runner/.config/uv`.
+**Cause**: GitHub's runner image sets `XDG_CONFIG_HOME=/home/runner/.config`
+system-wide. Root's SSH session carried it, and `sudo -u caml bash -lc ...`
+passed it on to the `caml` user. The uv installer writes its receipt to
+`$XDG_CONFIG_HOME/uv`. The same applies to `XDG_CACHE_HOME` (uv's cache) and
+`XDG_RUNTIME_DIR`. Any server image with XDG variables in
+`/etc/environment` would fail the same way, in the installer or later in
+uv and the frameworks.
+**Fix**: every switch to `caml` now drops the inherited `XDG_*` variables
+(`env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u
+XDG_STATE_HOME -u XDG_RUNTIME_DIR`): camlctl's `as_caml`,
+`bootstrap_vps.sh` (`as_caml_login`), `provision_vps.sh` and `sync_vps.sh`.
+caml's own `~/.profile` can still set them deliberately.
+`tests/test_camlctl.py::test_caml_user_commands_drop_inherited_xdg_dirs`
+covers it, and the next CI run re-ran the real setup.
 
 ### Testing notes: two ways the camlctl tests first passed for the wrong reason
 
