@@ -29,6 +29,9 @@ probing the data, anonymizing it first if needed. Then "push at the end".
   camlctl and its scripts but **not** a framework unless that framework's
   `__init__.py` lists it in `retained_env_vars` (`run_in_venv` builds a
   minimal env). That's why `HF_TOKEN` was dropped from `SECRETS_KNOWN`.
+- Keys are loaded by `as_caml` itself (`. ~/.caml-secrets` before every
+  command), not by `~/.profile`: CI's first 1.2.0 run showed a login shell
+  skips `.profile` when `~/.bash_profile` exists (GitHub's runner has one).
 - `camlctl secrets` writes as `caml` and pipes values through `printf`.
   Root never sources the file (the 1.1.0 `tabpfn-token` had a symlink race;
   it's now an alias). Keep both properties.

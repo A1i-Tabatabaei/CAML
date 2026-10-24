@@ -38,6 +38,12 @@ the end".
   both key routes (the hidden prompt through `ssh -tt` and sudo), probing,
   anonymizing, preparing by column number with metrics, and a final FLAML
   model trained with `--framework` and bundled.
+- **CI found a real bug on the first 1.2.0 run** (40094344652): keys were
+  stored but caml's commands didn't see them, because the loader sat in
+  `~/.profile` and the runner's `caml` account has a `~/.bash_profile`
+  (a bash login shell then skips `.profile`). camlctl now loads
+  `~/.caml-secrets` itself on every switch to `caml`. Run 40094762932:
+  all four jobs green, and `server-e2e` passes every new step.
 - New open item: KI-18 (the check-ins with a real user; the heuristic
   flags on real data). **Next**: the field reports, then the paper plan when
   Ali says.

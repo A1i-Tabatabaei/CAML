@@ -907,6 +907,10 @@ so it could never have caught this.
 sudo) reading `~/.profile`, where the loader line lives. A bash login shell
 reads only the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile`
 that exists, so any account with a `~/.bash_profile` skips the loader.
+Confirmed by the next run's diagnostic: on GitHub's runner the new `caml`
+account has `.bash_profile .bashrc .profile` (the image's `/etc/skel`
+presumably ships one). Ubuntu's stock `/etc/skel` doesn't, but other
+providers' images may, so a real VPS could have hit the same thing.
 **Fix**: `as_caml` sources `~/.caml-secrets` itself before running anything
 as `caml`, in both branches, and the check runs through `as_caml`. So it
 reports exactly what jobs and frameworks inherit. The `~/.profile` line stays
@@ -915,6 +919,10 @@ for interactive `sudo -iu caml` sessions. A unit test now writes a
 `camlctl script` still see the key. Removing the explicit loading makes it
 fail (mutation-checked). The e2e step prints which login files `caml` has,
 and checks the typed key's value from inside `caml`'s environment.
+**Verified** in CI run 40094762932: both key routes (the imported file, and
+the hidden prompt typed through `ssh -tt` and sudo) end in
+`TABPFN_TOKEN: set`, and a `camlctl script` running as `caml` sees the typed
+value.
 
 ### Probing data without reading it
 
