@@ -81,6 +81,10 @@ the agent probes the data without reading its values.
   home (`install`, then a separate write), which a process running as
   `caml` could have redirected with a symlink. `secrets` writes it as
   `caml`, through a pipe, so the key never appears on a command line.
+- Keys stored for `caml` were loaded only through `~/.profile`, which a bash
+  login shell skips whenever `~/.bash_profile` exists (GitHub's runner has
+  one; found by CI's `server-e2e`). camlctl now loads `~/.caml-secrets`
+  itself before every command it runs as `caml`.
 
 ## [1.1.0] - 2026-10-24
 
