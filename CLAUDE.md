@@ -59,8 +59,17 @@ publish for now. we'll proceed based on your plan afterwards." Then, on
 the two decisions: "i agree with both the license and having two separate
 repos. finish the job and then i'll let you know to go back to the plan."
 - **Two repos.** The old private repo was renamed
-  **`A1i-Tabatabaei/CAML-private`**: still private, the full development
-  history up to `2ec77fd`, an archive that gets no new pushes. The public
+  **`A1i-Tabatabaei/CAML-private`**: still private, with the full
+  development history up to `2ec77fd`. Since v1.1.0, Ali wants pushes to
+  **both** repos ("commit and push to both private and public repos"). The
+  histories are unrelated, so the private repo gets a merge commit that
+  keeps its old history and takes the public tree exactly:
+  `git fetch private`, then
+  `NEW=$(TZ=UTC git commit-tree 'main^{tree}' -p private-main -p main -m "Merge public main (<sha>) into the private archive")`,
+  then `git branch -f private-main "$NEW"` and
+  `git push private private-main:main`. **Never push `private-main` to
+  `origin`**: the old history holds server details that must stay private.
+  The private repo's CI also runs on these pushes (on private minutes). The public
   **`A1i-Tabatabaei/CAML`** starts from a fresh single commit (`0050456`),
   tagged `v1.0.0`, with a GitHub release. CI passed on that first push
   (156 passed, 1 skipped). In the local checkout, `origin` is the public repo, `private` is

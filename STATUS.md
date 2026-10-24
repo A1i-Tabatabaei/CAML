@@ -46,6 +46,11 @@ in the README, then commit and push to both repos.
   switch to `caml` (troubleshooting has the details).
 - New open items: KI-16 (camlctl on a real VPS), KI-17 (agent-driven runs
   from Windows and macOS: the field reports).
+- **Published**: tags and GitHub releases `v1.0.1` (`79647e8`) and `v1.1.0`
+  (`0fab9e4`, CI green on all four jobs). The private repo `CAML-private`
+  got a merge commit with the same tree (procedure in CLAUDE.md, "Two
+  repos"). **Next**: the field reports (a Mac user's, then Ali's Windows
+  run), and the paper plan when Ali says.
 
 **Before that (2026-10-24, later): v1.0.1 prepared locally: macOS fixes and an
 agent prompt.** Ali asked for a prompt to hand another agent ("clone the
