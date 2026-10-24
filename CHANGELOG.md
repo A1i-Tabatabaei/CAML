@@ -5,6 +5,13 @@ All notable changes to CAML. The format follows
 [Semantic Versioning](https://semver.org/). The day-by-day engineering record
 is in [STATUS.md](STATUS.md) and [CLAUDE.md](CLAUDE.md).
 
+## [Unreleased]
+
+### Changed
+
+- CI: `actions/checkout` v4 → v7 and `astral-sh/setup-uv` v6 → v7, both on
+  Node 24 (GitHub deprecated Node 20 for actions).
+
 ## [1.0.0] - 2026-10-24
 
 First public release, under the Apache License 2.0.
@@ -61,4 +68,5 @@ First public release, under the Apache License 2.0.
   theme, plus `AGENTS.md`, `CITATION.cff`, `CONTRIBUTING.md`, `SECURITY.md`
   and CI.
 
+[Unreleased]: https://github.com/A1i-Tabatabaei/CAML/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.0

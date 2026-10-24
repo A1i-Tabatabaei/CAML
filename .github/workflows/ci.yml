@@ -13,8 +13,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # Node 24 majors. setup-uv moves no floating major tag after v7, so a
+      # later bump needs an exact version.
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - name: Install the orchestrator (no AutoML frameworks)
         run: uv sync --locked
       - name: Tests

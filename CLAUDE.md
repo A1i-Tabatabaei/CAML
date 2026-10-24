@@ -16,8 +16,9 @@ repos. finish the job and then i'll let you know to go back to the plan."
 - **Two repos.** The old private repo was renamed
   **`A1i-Tabatabaei/CAML-private`**: still private, the full development
   history up to `2ec77fd`, an archive that gets no new pushes. The public
-  **`A1i-Tabatabaei/CAML`** starts from a fresh single commit, tagged
-  `v1.0.0`. In the local checkout, `origin` is the public repo, `private` is
+  **`A1i-Tabatabaei/CAML`** starts from a fresh single commit (`0050456`),
+  tagged `v1.0.0`, with a GitHub release. CI passed on that first push
+  (156 passed, 1 skipped). In the local checkout, `origin` is the public repo, `private` is
   the archive, and the branch `private-main` holds the old history.
 - **Commit identity**: public commits use Ali's GitHub noreply address
   (repo-local `user.email`), because Ali's GitHub email is private. Keep it

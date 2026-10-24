@@ -618,6 +618,11 @@ commit and tag were made with `TZ=UTC`.
 until a repo with the old name exists. The archive remote must point at
 `CAML-private` explicitly, not at the old URL, so a push meant for the
 archive can't land in the public repo.
+**First public CI run**: green (156 passed, 1 skipped, 55 s). Its one
+annotation: `actions/checkout@v4` and `astral-sh/setup-uv@v6` target Node 20,
+which GitHub deprecated for actions. Bumped to `checkout@v7` and
+`setup-uv@v7`, both on Node 24. setup-uv moves no floating major tag after
+v7 (v8–v10 exist only as exact versions), so a later bump must pin one.
 
 ## Framework-specific gotchas
 

@@ -13,8 +13,11 @@ license and the two-repo route ("i agree with both the license and having
 two separate repos"):
 
 - **Published** as `A1i-Tabatabaei/CAML` with a fresh single-commit history,
-  tagged `v1.0.0`. The old private repo was renamed
-  `A1i-Tabatabaei/CAML-private` and keeps the full history (an archive).
+  tagged `v1.0.0`, with a GitHub release
+  (https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.0). CI passed
+  on the first public push: 156 passed, 1 skipped, in 55 s. The old private
+  repo was renamed `A1i-Tabatabaei/CAML-private` and keeps the full history
+  (an archive).
 - **Licensing**: Apache-2.0 + `NOTICE`, confirmed by Ali (KI-40 closed).
   Version 0.1.0 → 1.0.0. `CITATION.cff`,
   `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md`, and CI
