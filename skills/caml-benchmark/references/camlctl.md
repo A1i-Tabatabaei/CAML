@@ -34,10 +34,15 @@ summary below.
 | Command | What it does |
 |---|---|
 | `info [--offline]` | Read-only facts: OS, arch, CPUs, RAM, swap, free disk, GPU, reachability of PyPI, GitHub, the PyTorch index and OpenML, whether the `caml` user, uv and CAML exist, running jobs, and warnings. Safe at any time, including before setup (run it as `bash /opt/caml-src/scripts/camlctl info` until setup has installed it). |
-| `setup [--detach] [--ref REF] [--src ARCHIVE_OR_URL]` | Installs everything: `bootstrap_vps.sh` (apt baseline, uv, the `caml` user, swap below 8 GB, a scoped sudoers entry), then `setup_workspace.sh` as `caml` (the workspace, `uv sync`, `caml doctor`), then `camlctl` itself and `~caml/data`. Idempotent. Takes 5–15 minutes: use `--detach`, then `camlctl wait setup 540`. `--ref` checks out a tag or branch (for example `v1.1.0`); `--src` installs from a pushed `git archive` instead of GitHub. |
+| `setup [--detach] [--ref REF] [--src ARCHIVE_OR_URL]` | Installs everything: `bootstrap_vps.sh` (apt baseline, uv, the `caml` user, swap below 8 GB, a scoped sudoers entry), then `setup_workspace.sh` as `caml` (the workspace, `uv sync`, `caml doctor`), then `camlctl` itself and `~caml/data`. Idempotent. Takes 5–15 minutes: use `--detach`, then `camlctl wait setup 540`. `--ref` checks out a tag or branch (for example `v1.2.0`); `--src` installs from a pushed `git archive` instead of GitHub. |
 | `version` | camlctl's version, and CAML's version and git revision. |
 | `update [--ref REF] [--force]` | `git pull` (or check out REF) in the workspace, `uv sync`, and refresh camlctl. It refuses while a run, sweep or job is active. Archive deploys (`provision_vps.sh`) update with `scripts/sync_vps.sh` instead. |
-| `tabpfn-token [--check\|--remove]` | Stores the TabPFN key for `caml`, so it never passes through chat. The user runs it themselves, in a real terminal: `ssh -t caml-vps camlctl tabpfn-token`. `--check` prints `token-set` or `token-missing`, never the key. |
+| `secrets` | **The user runs it**, in their own terminal: `ssh -t caml-vps camlctl secrets`. It asks for each API key `caml` may need (`TABPFN_TOKEN`, then any other NAME you've asked them for), with the input hidden, and stores them in `~caml/.caml-secrets` (mode 600, loaded by every camlctl command). Enter alone keeps a key unchanged. From an agent's shell tool it stops, because there's no terminal: that's deliberate. Since 1.2.0. |
+| `secrets --check` | One line per key: `NAME: set`, `missing` or `placeholder`, with what it's for. Never the value. Exit 0. |
+| `secrets --template` | An empty `caml-secrets.env` (comments, then `NAME=` lines) for a user who'd rather fill in a file. Write it locally with your file tool, not with `>`. |
+| `secrets --import FILE` | Reads an uploaded `NAME=value` file (comments, blank lines, `export `, quotes, BOM, CRLF and UTF-16 are fine), stores the keys, **deletes the uploaded file**, and prints only names, lengths and the check. Lines that aren't `NAME=value` with a NAME in capitals are skipped without being echoed. Exit 1 if nothing was filled in. |
+| `secrets --remove NAME\|--all` | Deletes one key, or the whole file. |
+| `tabpfn-token [--check\|--remove]` | The 1.1.0 interface, for `TABPFN_TOKEN` only. `--check` prints `token-set` or `token-missing`. |
 
 ## Work (as `caml`, in `~caml/caml-workspace/CAML`)
 
@@ -46,7 +51,7 @@ summary below.
 | `caml ARGS...` | `uv run caml ARGS...`, with the exit code passed through. For example: `camlctl caml status`, `camlctl caml doctor`, `camlctl caml prepare-data ...`, `camlctl caml leaderboard ...`. Benchmark paths can be relative to the repo: `--benchmark input/datasets/churn/churn.yaml`. |
 | `install [--force] FW...` | Installs several frameworks one after another, keeps going past a failure, and ends with `installed: ...` and `failed: ...` lines (exit 1 if any failed). `install --all` runs `caml install --all`. |
 | `dataset FILE [--name NAME] [--from-encoding ENC] [--replace]` | Moves an uploaded file into `~caml/data/` (owned by `caml`, mode 600) and describes it: `path`, `bytes`, `sha256` (compare it with your local hash), `format`, `encoding`, `line_endings`, `separator`, `columns`, `rows`, `header`, then `status` (`ok`, `needs-conversion` or `unsupported`) and the `next:` or `fix:` command. `--from-encoding WINDOWS-1252` (Excel on Windows) or `MACINTOSH` (old Mac exports) converts the file to UTF-8 and keeps the original as `NAME.orig`. An `.xlsx` workbook is refused with export instructions. It never overwrites a different file of the same name without `--replace`. |
-| `script FILE [ARGS...]` | Runs a script you uploaded, as `caml`, in the repo: `.py` files with `uv run python` (pandas and scikit-learn available), anything else with `bash`. It strips Windows CRLF line endings first. Use it for anything longer than one command. |
+| `script [--framework FW] FILE [ARGS...]` | Runs a script you uploaded, as `caml`, in the repo: `.py` files with `uv run python` (pandas and scikit-learn available), anything else with `bash`. It strips Windows CRLF line endings first. Use it for anything longer than one command. `--framework FW` runs a `.py` with that framework's own Python (`frameworks/FW/venv`), where the framework is importable: that's how you train the winner on all the data ([reporting.md](reporting.md#handing-over-the-winner-goal-b)). |
 
 ## Long jobs
 
@@ -77,9 +82,12 @@ ssh caml-vps bash /opt/caml-src/scripts/camlctl setup --detach
 ssh caml-vps camlctl wait setup 540
 ssh caml-vps camlctl start install install AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML
 ssh caml-vps camlctl wait install 540
+ssh caml-vps camlctl secrets --check
 scp "/path/to/My Data.csv" caml-vps:churn.csv
 ssh caml-vps camlctl dataset churn.csv
-ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id --name churn --folds 5
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn.csv
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn.csv --target churned
+ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --type binary --drop customer_id --name churn --folds 5
 ssh caml-vps camlctl caml sweep FLAML AutoGluon --benchmark input/datasets/churn/churn.yaml --constraint quick --dry-run
 ssh caml-vps camlctl start sweep caml sweep FLAML AutoGluon --benchmark input/datasets/churn/churn.yaml --constraint quick
 ssh caml-vps camlctl status
@@ -89,13 +97,16 @@ scp caml-vps:caml-bundles/churn-results.tar.gz .
 ```
 
 Repeat each `wait` until it exits 0. Exit 124 means the job is still
-running. The first two lines are the only raw shell commands: one pair of
+running. Between those lines sit the three check-ins
+([checkpoints.md](checkpoints.md)): the goal before any of it, the user's
+`ssh -t caml-vps camlctl secrets` after setup if the plan needs a key, and
+the confirmed task card between `describe-data` and `prepare-data`. The first two lines are the only raw shell commands: one pair of
 double quotes, with no `$`, backtick, `%` or `!` inside, which every local
 shell passes through unchanged.
 
 ## When camlctl itself misbehaves
 
-`camlctl` is new in 1.1.0. CI runs this whole flow as root over SSH on
+`camlctl` is new in 1.1.0 (`secrets` and `script --framework` in 1.2.0). CI runs this whole flow as root over SSH on
 Ubuntu 24.04 on every push (`tests/e2e/agent_flow.sh`), but real servers
 differ. If a camlctl command fails in a way its message doesn't explain,
 you can fall back to the old shape for that one step:

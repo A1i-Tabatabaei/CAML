@@ -6,7 +6,43 @@ history or in someone's head.
 
 ## Currently working on
 
-**Latest (2026-10-24, evening): v1.1.0, CAML driven from Windows, macOS or
+**Latest (2026-10-24, night): v1.2.0, three check-ins between the agent and
+the user.** Ali: "some interactions must exist between the agent and the
+user": (1) an `.env` file "or better yet, an interactive shell script" for
+API keys including TabPFN's, (2) ask whether the goal is a benchmark study
+for an article/report or "the best model with best scores" for the rest of
+the project, (3) "ask the user explicitly what their task is ... even though
+the agent can probe the dataset (anonymize if not done yet)". Then "push at
+the end".
+
+- **`references/checkpoints.md`**: the three check-ins with message
+  templates. They're required in SKILL.md (ground rule 7, Phases 0, 2 and 4)
+  and in all three prompts (new My details lines: Goal, What I want to
+  predict, Personal data).
+- **`camlctl secrets`**: the user types keys at a hidden prompt
+  (`ssh -t caml-vps camlctl secrets`), or fills in the `--template` file,
+  which `--import` reads and deletes. `--check` never prints values.
+  Written by `caml`, never sourced by root (fixes a symlink race in the
+  1.1.0 `tabpfn-token`, which stays as an alias). `HF_TOKEN` was dropped
+  from the known keys: framework subprocesses only get their
+  `retained_env_vars`, so it would never have reached one.
+- **`caml describe-data`**: a profile with no cell values (kinds, flags
+  including `pii?`, `leak?`, `group-id?`, target candidates, `ask_user`).
+  **`caml anonymize-data`**: drop, or HMAC-pseudonymize. **`prepare-data`**:
+  `--keep`, `--metric`, columns by number. **`camlctl script --framework
+  FW`**: train the winner on all data in its own venv. reporting.md has
+  templates for both goals and the winner hand-over.
+- Tests: 403 pass locally (`tests/test_describe.py` new; secrets tests
+  include hidden input on a real pseudo-terminal, mutation-checked; anchor
+  links between the agent docs now checked). `server-e2e` now also runs
+  both key routes (the hidden prompt through `ssh -tt` and sudo), probing,
+  anonymizing, preparing by column number with metrics, and a final FLAML
+  model trained with `--framework` and bundled.
+- New open item: KI-18 (the check-ins with a real user; the heuristic
+  flags on real data). **Next**: the field reports, then the paper plan when
+  Ali says.
+
+**Before that (2026-10-24, evening): v1.1.0, CAML driven from Windows, macOS or
 Linux by AI agents.** Ali: "update this new repository to support windows,
 mac, and linux ... optimize it for ai agents ... the agent should first
 determine what os it's running on and then choose the right scripts and

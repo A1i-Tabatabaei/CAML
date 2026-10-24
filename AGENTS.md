@@ -53,3 +53,11 @@ constraints live in `resources/`.
 8. **Field reports** (`caml-field-report-<os>.md`, from users' agents) are
    bug reports: fold each problem into the code, the operator profiles,
    troubleshooting and known-issues.
+9. **Keep the three check-ins intact** (goal, credentials, task;
+   `skills/caml-benchmark/references/checkpoints.md`). Agent docs never ask
+   for a secret in chat or on a command line (the user runs
+   `ssh -t caml-vps camlctl secrets`, or fills in a file the agent imports
+   unread), never print the user's data rows (`caml describe-data` instead
+   of `head`), and never prepare a task the user hasn't confirmed. A new
+   key a framework needs goes in camlctl's `SECRETS_KNOWN` **and** that
+   framework's `retained_env_vars`.

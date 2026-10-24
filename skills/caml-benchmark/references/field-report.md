@@ -79,6 +79,15 @@ One entry per problem, in the order they happened.
 - Suggested change to CAML: <file and section, and what to change>
 - Status: fixed | worked around | unresolved
 
+## Check-ins
+- Goal: <benchmark study | best model | both>; asked in the first message? <yes/no>
+- Credentials: <the hidden prompt | the file | not needed>; anything that went wrong
+  (no names or values of keys)
+- Task card: what the user corrected (target, task type, columns, row
+  structure, metric), and how many rounds it took
+- describe-data flags that were wrong: <column kind or flag, and why> (column
+  names only if the user agrees)
+
 ## Gotchas
 Things that didn't fail but would trip the next agent on this OS.
 - ...

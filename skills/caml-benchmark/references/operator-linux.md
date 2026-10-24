@@ -76,7 +76,7 @@ Windows files are under `/mnt/c/Users/NAME/...`.
 | Task | Command |
 |---|---|
 | File size | `ls -lh "/path/data.csv"` |
-| First lines | `head -n 5 "/path/data.csv"` |
+| Header line (column names only: don't print data rows) | `head -n 1 "/path/data.csv"` |
 | Encoding hint | `file -i "/path/data.csv"` (`camlctl dataset` checks it properly on the server) |
 | SHA-256 | `sha256sum "/path/data.csv"` |
 | Upload | `scp "/path/My Data.csv" caml-vps:churn.csv` |
@@ -84,6 +84,9 @@ Windows files are under `/mnt/c/Users/NAME/...`.
 | Download a bundle | `scp caml-vps:caml-bundles/NAME.tar.gz ~/caml-run/` |
 | Unpack it | `tar -xzf ~/caml-run/NAME.tar.gz -C ~/caml-run` |
 | Pause | `sleep 60` |
+| Keys file: create | Your file tool, at `~/caml-run/caml-secrets.env`, from `ssh caml-vps camlctl secrets --template` |
+| Keys file: open it for the user | `xdg-open ~/caml-run/caml-secrets.env`, or ask them to open it in their editor |
+| Keys file: upload, then delete | `scp ~/caml-run/caml-secrets.env caml-vps:caml-secrets.env`, then `shred -u ~/caml-run/caml-secrets.env` |
 | Stay awake while you monitor | `systemd-inhibit --what=sleep --why="CAML monitoring" sleep 6h` in the background |
 
 ## 5. Gotchas
@@ -94,9 +97,10 @@ Windows files are under `/mnt/c/Users/NAME/...`.
   tool's limit.
 - **Sleep.** A detached job keeps running on the server whatever this
   machine does; only your monitoring pauses.
-- **The TabPFN key** needs a real terminal. The user runs
-  `ssh -t caml-vps camlctl tabpfn-token` themselves, not through your shell
-  tool.
+- **API keys** need a real terminal. The user runs
+  `ssh -t caml-vps camlctl secrets` themselves, not through your shell tool
+  ([checkpoints.md](checkpoints.md) §2), or fills in `caml-secrets.env`
+  (the rows above).
 - **Spreadsheet exports.** LibreOffice: File > Save As > Text CSV, with
   "Character set: Unicode (UTF-8)". A Windows Excel "CSV (Comma
   delimited)" file is Windows-1252: convert it on the server with

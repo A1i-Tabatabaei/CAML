@@ -53,7 +53,11 @@ ssh caml-vps camlctl wait setup 540
 only `apt-get install`; `/usr/local/bin/camlctl`). It then runs
 `setup_workspace.sh` as `caml`: a clone at `~caml/caml-workspace/CAML`,
 `uv sync`, `caml doctor`. It's idempotent, so re-running it is safe. Pin a
-release with `setup --ref v1.1.0`.
+release with `setup --ref v1.2.0`.
+
+API keys come next: the user runs `ssh -t caml-vps camlctl secrets` in their
+own terminal, or fills in a file you import
+([checkpoints.md](checkpoints.md) §2). They live in `~caml/.caml-secrets`.
 
 **From a clone, for developers** (Linux, macOS since 1.0.1, Git Bash or WSL
 on Windows): `scripts/provision_vps.sh caml-vps` packages the checked-out

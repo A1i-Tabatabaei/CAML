@@ -22,7 +22,7 @@
 # CAMLCTL_DATA, CAMLCTL_STATE, CAMLCTL_BIN, CAMLCTL_BUNDLES.
 set -uo pipefail
 
-CAMLCTL_VERSION="1.1.0"
+CAMLCTL_VERSION="1.2.0"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SELF_DIR="$(dirname "$SELF")"
 CAML_USER="${CAMLCTL_USER:-caml}"
@@ -197,9 +197,13 @@ Setup and health
   version                     camlctl and CAML versions
   update [--ref REF] [--force]
                               git pull (or check out REF) in the workspace, uv sync
+  secrets [--check | --template | --import FILE | --remove NAME|--all]
+                              API keys for caml (TABPFN_TOKEN), never through chat.
+                              Interactive, input hidden: the user runs it themselves with
+                                ssh -t caml-vps camlctl secrets
+                              or fills in the --template file, which --import reads and deletes
   tabpfn-token [--check|--remove]
-                              Store the TabPFN key for caml. Interactive: run it yourself
-                              with  ssh -t caml-vps camlctl tabpfn-token
+                              The same, for TABPFN_TOKEN only (kept for 1.1.0 prompts)
 
 Work (as the caml user, in ~caml/caml-workspace/CAML)
   caml ARGS...                uv run caml ARGS...   e.g. camlctl caml status
@@ -208,8 +212,10 @@ Work (as the caml user, in ~caml/caml-workspace/CAML)
   dataset FILE [--name NAME] [--from-encoding ENC] [--replace]
                               Move an uploaded file into ~caml/data and describe it:
                               sha256, encoding, separator, header, rows
-  script FILE [ARGS...]       Run a bash (or .py) script you uploaded, as caml, in the
-                              repo; Windows CRLF line endings are stripped first
+  script [--framework FW] FILE [ARGS...]
+                              Run a bash (or .py) script you uploaded, as caml, in the
+                              repo; Windows CRLF line endings are stripped first.
+                              --framework FW runs a .py with that framework's own Python
 
 Long jobs (detached; they survive SSH dropping)
   start JOB caml|install|script|setup ARGS...
@@ -430,10 +436,22 @@ cmd_install() {
 
 cmd_script() {
   require_repo
+  local fw=""
+  if [[ "${1:-}" == "--framework" ]]; then
+    fw="${2:-}"
+    [[ "$fw" =~ ^[A-Za-z0-9_]+$ ]] || die2 "usage: camlctl script --framework FW FILE.py [ARGS...]"
+    shift 2
+  fi
   local src="${1:-}"
-  [[ -n "$src" ]] || die2 "usage: camlctl script FILE [ARGS...]"
+  [[ -n "$src" ]] || die2 "usage: camlctl script [--framework FW] FILE [ARGS...]"
   shift
   [[ -f "$src" ]] || die "no such file: $src (upload it first: scp FILE caml-vps:NAME.sh)"
+  local fw_python=""
+  if [[ -n "$fw" ]]; then
+    [[ "$src" == *.py ]] || die2 "--framework runs Python files (.py) only"
+    fw_python="$REPO/frameworks/$fw/venv/bin/python"
+    [[ -x "$fw_python" ]] || die "$fw isn't installed (no $fw_python). Install it: camlctl install $fw"
+  fi
   local dir="$CAML_HOME/.camlctl-scripts" dest
   install -d -o "$CAML_USER" -g "$(caml_group)" -m 0700 "$dir"
   dest="$dir/$(basename "$src")"
@@ -442,6 +460,10 @@ cmd_script() {
   sed 's/\r$//' "$src" > "$dest"
   chown "$CAML_USER:$(caml_group)" "$dest" 2>/dev/null
   chmod 0700 "$dest"
+  if [[ -n "$fw_python" ]]; then
+    as_caml "$REPO" "$fw_python" "$dest" "$@"
+    return
+  fi
   case "$dest" in
     *.py) as_caml "$REPO" uv run python "$dest" "$@" ;;
     *) as_caml "$REPO" bash "$dest" "$@" ;;
@@ -459,8 +481,10 @@ cmd_start() {
   esac
   local args=("$sub" "$@")
   if [[ "$sub" == "script" ]]; then
-    [[ -n "${args[1]:-}" && -f "${args[1]}" ]] || die "no such file: ${args[1]:-<missing>}"
-    args[1]="$(readlink -f "${args[1]}")"
+    local fi_=1
+    [[ "${args[1]:-}" == "--framework" ]] && fi_=3
+    [[ -n "${args[fi_]:-}" && -f "${args[fi_]}" ]] || die "no such file: ${args[fi_]:-<missing>}"
+    args[fi_]="$(readlink -f "${args[fi_]}")"
   fi
   local state; state="$(job_state "$name")"
   if [[ "$state" == "running" || "$state" == "starting" ]]; then
@@ -678,7 +702,7 @@ cmd_dataset() {
     50415231*)
       echo "format: parquet"
       echo "status: ok"
-      echo "next: camlctl caml prepare-data $dest --target COLUMN --name ${base%.*} --folds 5"
+      echo "next: camlctl caml describe-data $dest"
       return 0 ;;
   esac
   if [[ -n "$enc" ]]; then
@@ -723,7 +747,7 @@ cmd_dataset() {
   echo "header: ${header:0:400}"
   if (( utf8 )); then
     echo "status: ok"
-    echo "next: camlctl caml prepare-data $dest --target COLUMN --name ${base%.*} --folds 5"
+    echo "next: camlctl caml describe-data $dest"
   else
     echo "status: needs-conversion"
     echo "fix: camlctl dataset $dest --from-encoding WINDOWS-1252   (Excel on Windows; MACINTOSH for old Mac exports; ask the user if unsure)"
@@ -764,37 +788,255 @@ cmd_bundle() {
   echo "unpack: tar -xzf $name.tar.gz"
 }
 
-cmd_tabpfn_token() {
+# --- secrets -----------------------------------------------------------------
+# API keys for the caml user live in ~caml/.caml-secrets (mode 600) as
+# `export NAME=value` lines, which ~caml/.profile sources, so every command
+# camlctl runs as caml (a login shell) sees them. The user types them in
+# (`ssh -t caml-vps camlctl secrets`, input hidden) or fills in a file that
+# the agent uploads and `--import`s; either way no key passes through the
+# agent's chat, and camlctl never prints one. The file is written by the
+# caml user itself and never read as code by root: a framework running as
+# caml can't turn it into a way to root.
+SECRET_NAME_RE='^[A-Z][A-Z0-9_]{0,63}$'
+SECRET_PLACEHOLDER="REPLACE_WITH_YOUR_TABPFN_API_KEY"   # frameworks/TabPFN*/exec.py refuse it too
+# NAME|when it's needed|where to get it. Other NAMEs can be stored too; they
+# reach camlctl's commands and scripts, but a framework only sees the
+# variables its integration passes through (frameworks/*/__init__.py,
+# retained_env_vars), so add a name here only together with that.
+SECRETS_KNOWN=(
+  "TABPFN_TOKEN|needed for TabPFN and TabPFNClient|https://ux.priorlabs.ai: accept the licenses on the Licenses tab, then create an API key"
+)
+
+# Runs as caml. $1: caml's home. stdin: NAME=VALUE lines; an empty VALUE
+# removes NAME.
+# shellcheck disable=SC2016  # expanded by the caml-side shell
+SECRETS_WRITER='
+umask 077
+f="$1/.caml-secrets"
+tmp="$(mktemp "$1/.caml-secrets.XXXXXX")" || exit 1
+if [ -f "$f" ]; then cat "$f" > "$tmp"; fi
+while IFS= read -r line || [ -n "$line" ]; do
+  name="${line%%=*}"; value="${line#*=}"
+  grep -v "^export $name=" "$tmp" > "$tmp.new"; mv -f "$tmp.new" "$tmp"
+  if [ -n "$value" ]; then printf "export %s=%q\n" "$name" "$value" >> "$tmp"; fi
+done
+mv -f "$tmp" "$f"
+hook="[ -f ~/.caml-secrets ] && . ~/.caml-secrets"
+grep -qxF "$hook" "$1/.profile" 2>/dev/null || printf "%s\n" "$hook" >> "$1/.profile"
+'
+# Runs as caml in a login shell, so it sees what every caml command sees.
+# $1: caml's home, then the names to report. Prints "NAME state", never a value.
+# shellcheck disable=SC2016
+SECRETS_CHECKER='
+home="$1"; shift
+names="$*"
+if [ -f "$home/.caml-secrets" ]; then
+  names="$names $(sed -n "s/^export \([A-Z][A-Z0-9_]*\)=.*/\1/p" "$home/.caml-secrets")"
+fi
+seen=" "
+for n in $names; do
+  case "$seen" in *" $n "*) continue ;; esac
+  seen="$seen$n "
+  v="${!n:-}"
+  if [ -z "$v" ]; then echo "$n missing"
+  elif [ "$v" = REPLACE_WITH_YOUR_TABPFN_API_KEY ]; then echo "$n placeholder"
+  else echo "$n set"; fi
+done
+'
+
+secrets_write() { as_caml "$CAML_HOME" bash -c "$SECRETS_WRITER" camlctl "$CAML_HOME"; }
+
+secrets_states() {  # NAME state lines for the known names plus any in the file
+  local names=() e
+  for e in "${SECRETS_KNOWN[@]}"; do names+=("${e%%|*}"); done
+  as_caml "$CAML_HOME" env HOME="$CAML_HOME" bash -lc "$SECRETS_CHECKER" camlctl "$CAML_HOME" "${names[@]}" 2>/dev/null
+}
+
+secret_info() {  # NAME -> "when|where" (empty for names camlctl doesn't know)
+  local e
+  for e in "${SECRETS_KNOWN[@]}"; do
+    [[ "${e%%|*}" == "$1" ]] && { echo "${e#*|}"; return; }
+  done
+}
+
+secrets_report() {
+  local f="$CAML_HOME/.caml-secrets" line name state info
+  if [[ -f "$f" ]]; then echo "file: $f"; else echo "file: $f (not created yet)"; fi
+  while read -r name state; do
+    [[ -n "$name" ]] || continue
+    info="$(secret_info "$name")"
+    echo "$name: $state${info:+ (${info%%|*})}"
+  done <<< "$(secrets_states)"
+}
+
+trim() {
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"
+  printf '%s' "${v%"${v##*[![:space:]]}"}"
+}
+
+secrets_template() {
+  cat <<'EOF'
+# CAML credentials for the caml user on your server.
+# Type each key you have after its = sign, then save and close the file.
+# Leave a line empty to skip it. No quotes needed. Never paste a key into a chat.
+# The agent then uploads this file, imports it, and deletes both copies.
+# Add other keys as NAME=value lines only if the agent asks for one.
+EOF
+  local e name rest
+  for e in "${SECRETS_KNOWN[@]}"; do
+    name="${e%%|*}"; rest="${e#*|}"
+    echo
+    echo "# ${rest%%|*}"
+    echo "# Get it at ${rest#*|}"
+    echo "$name="
+  done
+}
+
+secrets_ask() {  # NAME: prompt for it, hidden; appends NAME=VALUE to $SECRETS_UPDATES
+  local name="$1" value
+  read -rsp "  $name (hidden): " value || value=""
+  echo
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "  -> unchanged"
+  elif [[ "$value" == "$SECRET_PLACEHOLDER" ]]; then
+    echo "  -> that's the placeholder, not a key: unchanged"
+  else
+    SECRETS_UPDATES+="$name=$value"$'\n'
+    echo "  -> received (${#value} characters)"
+  fi
+}
+
+secrets_interactive() {  # [ONLY_NAME]
+  local only="${1:-}" cmd="secrets"
+  [[ -n "$only" ]] && cmd="tabpfn-token"
+  [[ -t 0 ]] || die "this asks for keys, so it needs a terminal. The user runs it themselves, in their own terminal (not through the agent): ssh -t caml-vps camlctl $cmd"
+  echo "camlctl secrets: API keys for the $CAML_USER user, kept in $CAML_HOME/.caml-secrets (mode 600)."
+  echo "Paste a key and press Enter. Nothing appears while you type or paste: that's on purpose."
+  echo "Press Enter alone to keep the current value or to skip a key."
+  local -A state=()
+  local name st e rest
+  while read -r name st; do [[ -n "$name" ]] && state[$name]="$st"; done <<< "$(secrets_states)"
+  SECRETS_UPDATES=""
+  for e in "${SECRETS_KNOWN[@]}"; do
+    name="${e%%|*}"; rest="${e#*|}"
+    [[ -n "$only" && "$name" != "$only" ]] && continue
+    echo
+    echo "$name: ${rest%%|*}"
+    echo "  get it at ${rest#*|}"
+    echo "  currently: ${state[$name]:-missing}"
+    secrets_ask "$name"
+  done
+  if [[ -z "$only" ]]; then
+    while true; do
+      echo
+      read -rp "Another key? Type its NAME in capitals (only if the agent asked for one), or press Enter to finish: " name || name=""
+      name="$(trim "$name")"
+      [[ -z "$name" ]] && break
+      if [[ ! "$name" =~ $SECRET_NAME_RE ]]; then
+        echo "  a NAME is capital letters, digits and _, starting with a letter"
+        continue
+      fi
+      secrets_ask "$name"
+    done
+  fi
+  if [[ -n "$SECRETS_UPDATES" ]]; then
+    printf '%s' "$SECRETS_UPDATES" | secrets_write || die "couldn't write $CAML_HOME/.caml-secrets"
+  fi
+  SECRETS_UPDATES=""
+  echo
+  secrets_report
+  echo "Done. Tell the agent; it can check with: ssh caml-vps camlctl secrets --check"
+}
+
+secrets_import() {
+  local src="${1:-}"
+  [[ -n "$src" ]] || die2 "usage: camlctl secrets --import FILE"
+  [[ -f "$src" ]] || die "no such file: $src (upload it first: scp caml-secrets.env caml-vps:caml-secrets.env)"
+  src="$(readlink -f "$src")"
+  local magic reader=(cat "$src")
+  magic="$(head -c 2 "$src" | od -An -tx1 | tr -d ' \n')"
+  # PowerShell 5.1's > and Notepad's "Unicode" save as UTF-16.
+  [[ "$magic" == "fffe" || "$magic" == "feff" ]] && reader=(iconv -f UTF-16 -t UTF-8 "$src")
+  local line name value n=0 imported=0
+  local LQ=$'\xe2\x80\x9c' RQ=$'\xe2\x80\x9d' LS=$'\xe2\x80\x98' RS=$'\xe2\x80\x99'
+  SECRETS_UPDATES=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    line="${line%$'\r'}"
+    (( n == 1 )) && line="${line#$'\xEF\xBB\xBF'}"
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == "export "* ]] && line="$(trim "${line#export }")"
+    name="$(trim "${line%%=*}")"
+    # Never echo a line that isn't NAME=value: it might be a pasted key.
+    if [[ "$line" != *=* || ! "$name" =~ $SECRET_NAME_RE ]]; then
+      echo "line $n: not a NAME=value line (NAME in capitals), skipped"
+      continue
+    fi
+    value="$(trim "${line#*=}")"
+    if [[ ${#value} -ge 2 && ( "$value" == \"*\" || "$value" == \'*\' ) && "${value:0:1}" == "${value: -1}" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == "$LQ"*"$RQ" || "$value" == "$LS"*"$RS" ]]; then   # TextEdit's smart quotes
+      value="${value#"$LQ"}"; value="${value#"$LS"}"; value="${value%"$RQ"}"; value="${value%"$RS"}"
+    else
+      value="$(trim "${value%% #*}")"
+    fi
+    if [[ -z "$value" ]]; then
+      echo "$name: empty, skipped"
+    elif [[ "$value" == "$SECRET_PLACEHOLDER" || "$value" == \<*\> ]]; then
+      echo "$name: still the placeholder, skipped"
+    else
+      SECRETS_UPDATES+="$name=$value"$'\n'
+      imported=$((imported + 1))
+      echo "$name: imported (${#value} characters)"
+    fi
+  done < <("${reader[@]}")
+  if [[ -n "$SECRETS_UPDATES" ]]; then
+    printf '%s' "$SECRETS_UPDATES" | secrets_write || die "couldn't write $CAML_HOME/.caml-secrets"
+  fi
+  SECRETS_UPDATES=""
+  shred -u "$src" 2>/dev/null || rm -f "$src"
+  echo "deleted: $src (the uploaded copy; delete the local one too)"
+  secrets_report
+  if (( imported == 0 )); then
+    echo "camlctl: nothing imported: every value was empty or a placeholder. Did the user fill in and save the file?" >&2
+    return 1
+  fi
+}
+
+cmd_secrets() {
   require_user
-  local f="$CAML_HOME/.caml-secrets"
+  case "${1:-}" in
+    "") secrets_interactive ;;
+    --check) secrets_report ;;
+    --template) secrets_template ;;
+    --import) secrets_import "${2:-}" ;;
+    --remove)
+      local name="${2:-}"
+      if [[ "$name" == "--all" ]]; then
+        as_caml "$CAML_HOME" rm -f "$CAML_HOME/.caml-secrets"
+        echo "removed: every key ($CAML_HOME/.caml-secrets)"
+      else
+        [[ "$name" =~ $SECRET_NAME_RE ]] || die2 "usage: camlctl secrets --remove NAME|--all"
+        printf '%s=\n' "$name" | secrets_write || die "couldn't update $CAML_HOME/.caml-secrets"
+        echo "removed: $name"
+      fi
+      secrets_report ;;
+    *) die2 "usage: camlctl secrets [--check | --template | --import FILE | --remove NAME|--all]" ;;
+  esac
+}
+
+cmd_tabpfn_token() {  # the 1.1.0 interface, kept so its prompts keep working
+  require_user
   case "${1:-}" in
     --check)
-      # shellcheck disable=SC2016  # expanded by caml's login shell, not here
-      as_caml "$CAML_HOME" bash -c 'if [ -n "${TABPFN_TOKEN:-}" ]; then echo token-set; else echo token-missing; fi'
-      return ;;
-    --remove)
-      rm -f "$f"
-      echo "removed $f"
-      return ;;
-    "") ;;
+      if secrets_states | grep -qx "TABPFN_TOKEN set"; then echo "token-set"; else echo "token-missing"; fi ;;
+    --remove) cmd_secrets --remove TABPFN_TOKEN ;;
+    "") secrets_interactive TABPFN_TOKEN ;;
     *) die2 "usage: camlctl tabpfn-token [--check|--remove]" ;;
   esac
-  [[ -t 0 ]] || die "this asks for the key, so it needs a terminal. Run it yourself: ssh -t caml-vps camlctl tabpfn-token"
-  local tok=""
-  read -rsp "TabPFN API key for $CAML_USER (input hidden): " tok
-  echo
-  [[ -n "$tok" ]] || die "empty input; nothing saved"
-  install -m 0600 -o "$CAML_USER" -g "$(caml_group)" /dev/null "$f"
-  printf 'export TABPFN_TOKEN=%q\n' "$tok" > "$f"
-  tok=""
-  # A login shell reads ~/.profile; Ubuntu's ~/.bashrc returns early for
-  # non-interactive shells, so the export must not go there.
-  local line='[ -f ~/.caml-secrets ] && . ~/.caml-secrets'
-  if ! grep -qxF "$line" "$CAML_HOME/.profile" 2>/dev/null; then
-    echo "$line" >> "$CAML_HOME/.profile"
-    chown "$CAML_USER:$(caml_group)" "$CAML_HOME/.profile" 2>/dev/null
-  fi
-  echo "saved for $CAML_USER (not shown). Check: camlctl tabpfn-token --check"
 }
 
 # --- main ------------------------------------------------------------------
@@ -831,6 +1073,7 @@ case "$cmd" in
   stop) cmd_stop "$@" ;;
   status) cmd_status ;;
   bundle) cmd_bundle "$@" ;;
+  secrets) cmd_secrets "$@" ;;
   tabpfn-token) cmd_tabpfn_token "$@" ;;
   *) echo "camlctl: unknown command '$cmd'" >&2; cmd_help >&2; exit 2 ;;
 esac

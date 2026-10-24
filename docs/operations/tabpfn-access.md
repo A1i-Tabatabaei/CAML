@@ -9,12 +9,15 @@ in this file or any other — not even temporarily.
 - An untracked local note: `docs/operations/.tabpfn-access.local.md`
   (already `.gitignore`d — see the repo's `.gitignore`), or
 - As an exported environment variable for the `caml` user on the VPS —
-  this is the mechanism that actually matters at runtime. Since 1.1.0 the
-  user stores it with `ssh -t caml-vps camlctl tabpfn-token` (a silent
-  prompt; it writes `~caml/.caml-secrets`, mode 600, sourced from
-  `~caml/.profile`, not `~/.bashrc`, which returns early for the
-  non-interactive login shells camlctl uses), and checks it with
-  `camlctl tabpfn-token --check` (`token-set`/`token-missing`). **Both TabPFN frameworks read
+  this is the mechanism that actually matters at runtime. Since 1.2.0 the
+  user stores it with `ssh -t caml-vps camlctl secrets` (a hidden prompt),
+  or fills in the file from `camlctl secrets --template`, which the agent
+  imports unread with `camlctl secrets --import` (it deletes the uploaded
+  copy). Either way it lands in `~caml/.caml-secrets` (mode 600, written by
+  the `caml` user itself, sourced from `~caml/.profile`, not `~/.bashrc`,
+  which returns early for the non-interactive login shells camlctl uses).
+  `camlctl secrets --check` says `set` or `missing`, never the value. The
+  1.1.0 `camlctl tabpfn-token` still works for this one key. **Both TabPFN frameworks read
   `TABPFN_TOKEN` straight from the process environment** (CAML doesn't parse
   or forward it from a file): the hosted `TabPFNClient` (`tabpfn-client`) uses
   it on *every* call, and the local `TabPFN` (`tabpfn`) uses it *once*, to

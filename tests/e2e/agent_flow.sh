@@ -74,17 +74,42 @@ out="$(remote camlctl version)"; printf '%s\n' "$out"
 expect "version" '^caml [0-9]+\.[0-9]+\.[0-9]+' "$out"
 expect "info after setup" '^caml_user: present$' "$(remote camlctl info --offline)"
 
+step "Check-in 2, keys: a filled-in file (Notepad style), imported unread"
+out="$(remote camlctl secrets --check)"; printf '%s\n' "$out"
+expect "no key yet" '^TABPFN_TOKEN: (missing|set)' "$out"
+remote camlctl secrets --template \
+  | awk '{ sub(/^TABPFN_TOKEN=$/, "TABPFN_TOKEN=e2e-file-token"); printf "%s\r\n", $0 }' > "$WORK/caml-secrets.env"
+scp -q "$WORK/caml-secrets.env" "$HOST:caml-secrets.env"
+out="$(remote camlctl secrets --import caml-secrets.env)"; printf '%s\n' "$out"
+expect "imported" '^TABPFN_TOKEN: imported \(14 characters\)$' "$out"
+expect "uploaded copy deleted" '^deleted: ' "$out"
+expect "set" '^TABPFN_TOKEN: set' "$out"
+grep -q "e2e-file-token" <<< "$out" && fail "secrets --import printed the key"
+[[ -z "$(remote "ls caml-secrets.env 2>/dev/null || true")" ]] || fail "the uploaded keys file survived the import"
+expect "1.1.0 check" '^token-set$' "$(remote camlctl tabpfn-token --check)"
+
+step "Check-in 2, keys: typed at the hidden prompt (ssh -t through sudo)"
+out="$(printf 'e2e-typed-token\n\n' | ssh -tt -o BatchMode=yes "$HOST" camlctl secrets 2>&1 | tr -d '\r')"
+printf '%s\n' "$out" | grep -v 'e2e-typed-token' || true
+expect "received" 'received \(15 characters\)' "$out"
+expect "set after typing" '^TABPFN_TOKEN: set' "$out"
+printf '%s\n' '[ "${TABPFN_TOKEN:-}" = e2e-typed-token ] && echo key-matches || echo key-differs' > "$WORK/check_key.sh"
+scp -q "$WORK/check_key.sh" "$HOST:check_key.sh"
+expect "caml's login shell sees the typed key" '^key-matches$' "$(remote camlctl script check_key.sh)"
+out="$(remote camlctl secrets --remove --all)"; printf '%s\n' "$out"
+expect "removed" '^TABPFN_TOKEN: missing' "$out"
+
 step "A Windows-style Excel export: Windows-1252, semicolons, decimal commas, CRLF"
 awk 'BEGIN {
   srand(42)
-  printf "customer_id;age;monthly_spend;plan;churned\r\n"
+  printf "customer_id;email;age;monthly_spend;plan;churned\r\n"
   for (i = 1; i <= 400; i++) {
     age = 18 + int(rand() * 60); spend = 5 + rand() * 95
     plan = (rand() < 0.5) ? "basic" : "premium caf\303\251"
     p = (spend > 60 ? 0.75 : 0.2) + (age < 30 ? 0.1 : 0)
     churned = (rand() < p) ? "yes" : "no"
     s = sprintf("%.2f", spend); sub(/\./, ",", s)
-    printf "%d;%d;%s;%s;%s\r\n", i, age, s, plan, churned
+    printf "%d;user%d@example.com;%d;%s;%s;%s\r\n", i, i, age, s, plan, churned
   }
 }' | iconv -f UTF-8 -t WINDOWS-1252 > "$WORK/My Export.csv"
 LOCAL_SHA="$( (sha256sum "$WORK/My Export.csv" 2>/dev/null || shasum -a 256 "$WORK/My Export.csv") | cut -d' ' -f1)"
@@ -99,10 +124,27 @@ expect "converted" '^encoding: utf-8$' "$out"
 expect "separator" '^separator: semicolon$' "$out"
 expect "rows" '^rows: 400 ' "$out"
 
-step "prepare-data"
-out="$(remote camlctl caml prepare-data "$DATA_PATH" --target churned --drop customer_id --name e2e --folds 2 --force 2>&1)"
+step "Check-in 3, the task: probe without values, remove identifiers, probe with the target"
+out="$(remote camlctl caml describe-data "$DATA_PATH" 2>&1)"; printf '%s\n' "$out"
+expect "id-like" '^ +1 +customer_id +integer .*id-like' "$out"
+expect "pii" '^ +2 +email .*pii\?' "$out"
+expect "candidates" '^target_candidates: churned' "$out"
+grep -q "@example.com" <<< "$out" && fail "describe-data printed cell values"
+out="$(remote camlctl caml anonymize-data "$DATA_PATH" --drop email --out /home/caml/data/e2e-anon.csv --delete-original 2>&1)"
+printf '%s\n' "$out"
+expect "anonymized" '^dropped: email$' "$out"
+expect "original deleted" "^deleted: $DATA_PATH" "$out"
+DATA_PATH=/home/caml/data/e2e-anon.csv
+out="$(remote camlctl caml describe-data "$DATA_PATH" --target churned 2>&1)"; printf '%s\n' "$out"
+expect "task guess" '^task_type_guess: binary' "$out"
+expect "classes" '^classes: (no|yes) [0-9]+, (no|yes) [0-9]+$' "$out"
+
+step "prepare-data, exactly as confirmed (a column by number, an explicit type and metric)"
+out="$(remote camlctl caml prepare-data "$DATA_PATH" --target churned --type binary --drop 1 --metric auc --metric balacc --name e2e --folds 2 --force 2>&1)"
 printf '%s\n' "$out"
 expect "prepare-data type" '^Type +binary' "$out"
+expect "dropped by number" '^Dropped +customer_id$' "$out"
+expect "metric" '^Metric +auc ranks; also balacc$' "$out"
 B=input/datasets/e2e/e2e.yaml
 
 step "A helper script written on Windows (CRLF), run with camlctl script: a 60 s budget for CI"
@@ -136,6 +178,27 @@ expect "fold 1 ok" '^FLAML +e2e +fold 1 +ok$' "$out"
 out="$(remote camlctl caml leaderboard --benchmark "$B" --constraint quick 2>&1)"; printf '%s\n' "$out"
 expect "leaderboard" 'FLAML' "$out"
 
+step "Hand over the winner: train it on all rows with FLAML's own Python (a CRLF script)"
+printf '%s\r\n' \
+  'import pickle, sys' \
+  'from pathlib import Path' \
+  'import flaml' \
+  'import pandas as pd' \
+  'data = Path("input/datasets/e2e")' \
+  'df = pd.concat([pd.read_csv(data / "e2e_train_0.csv"), pd.read_csv(data / "e2e_test_0.csv")])' \
+  'X, y = df.drop(columns="churned"), df["churned"]' \
+  'automl = flaml.AutoML()' \
+  'automl.fit(X_train=X, y_train=y, task="classification", metric="roc_auc", time_budget=15, verbose=0)' \
+  'out = Path("output/final-model/FLAML")' \
+  'out.mkdir(parents=True, exist_ok=True)' \
+  'pickle.dump(automl, open(out / "model.pkl", "wb"))' \
+  '(out / "README.md").write_text(f"FLAML {flaml.__version__}, Python {sys.version.split()[0]}, {automl.best_estimator}\n")' \
+  'print("rows", len(df), "saved", out)' > "$WORK/fit_final.py"
+scp -q "$WORK/fit_final.py" "$HOST:fit_final.py"
+remote camlctl start e2e-final script --framework FLAML fit_final.py
+wait_job e2e-final 900
+expect "final model" '^rows 400 saved output/final-model/FLAML$' "$(remote camlctl logs e2e-final 20)"
+
 step "Bundle and copy back"
 out="$(remote camlctl bundle "e2e-$STAMP")"; printf '%s\n' "$out"
 REMOTE_BUNDLE="$(sed -n 's/^copy: scp [^:]*:\([^ ]*\) \.$/\1/p' <<< "$out")"
@@ -144,6 +207,8 @@ scp -q "$HOST:$REMOTE_BUNDLE" "$WORK/"
 (cd "$WORK" && tar -xzf "e2e-$STAMP.tar.gz")
 grep -q FLAML "$WORK/e2e-$STAMP/output/results.csv" || fail "results.csv in the bundle has no FLAML row"
 [[ -f "$WORK/e2e-$STAMP/datasets/e2e/e2e.yaml" && -f "$WORK/e2e-$STAMP/server-info.txt" ]] || fail "bundle is missing files"
+[[ -s "$WORK/e2e-$STAMP/output/final-model/FLAML/model.pkl" ]] || fail "bundle is missing the final model"
+grep -q "metric: \[auc, balacc\]" "$WORK/e2e-$STAMP/datasets/e2e/e2e.yaml" || fail "the YAML lost the confirmed metrics"
 echo "bundle ok: $(find "$WORK/e2e-$STAMP" -type f | wc -l) files"
 
 step "camlctl stop ends a job and its children (real root + sudo)"

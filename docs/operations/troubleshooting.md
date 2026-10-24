@@ -839,3 +839,88 @@ kept there rather than duplicated here, since they're scoped to one
 framework's manifest/exec.py. The 2026-07-31 messy-data `validation`
 benchmark findings (which frameworks handle real-world data-quality edge
 cases and which choke) are collected in `operations/e2e-verification.md`.
+
+## The three check-ins: keys, the data's values, the task (2026-10-24, v1.2.0)
+
+Ali asked for three interactions between the agent and the user: an `.env`
+file or, better, an interactive script for API keys, the TabPFN key
+included; a question about the goal (a benchmark study for an article or
+report, or the best model for the rest of the project); and an explicit
+confirmation of the task (binary, multiclass or regression, X and y,
+whether all the features belong in), even after the agent has probed the
+data, anonymizing it first if that hasn't been done. They became
+`references/checkpoints.md`, `camlctl secrets`, `caml describe-data` and
+`caml anonymize-data`. The entries below are what building them turned up.
+
+### A key stored for `caml` doesn't reach every framework
+
+**Finding**: the first draft of `camlctl secrets` offered an optional
+`HF_TOKEN` ("if a Hugging Face download is rate-limited"). But
+`frameworks/shared/caller.py::run_in_venv` builds a minimal environment for
+each framework subprocess: only `STORAGE_ENV_VARS` (HOME and the XDG dirs)
+plus the integration's own `retained_env_vars` cross. `TABPFN_TOKEN` reaches
+TabPFN because `frameworks/TabPFN/__init__.py` lists it. An `HF_TOKEN` in
+`~caml/.caml-secrets` would have been in camlctl's environment and never in
+the framework's, so the offer would have promised something that does
+nothing. **Fix**: `SECRETS_KNOWN` lists only `TABPFN_TOKEN`. Other names
+can still be stored (they reach camlctl's commands and `camlctl script`),
+and a comment in camlctl says a new known key needs a matching
+`retained_env_vars` entry. The agent docs say not to promise that a key
+reaches a framework.
+
+### The 1.1.0 key file was written by root inside the `caml` user's home
+
+**Finding** (from review, not an incident): `tabpfn-token` ran as root,
+created `~caml/.caml-secrets` with `install`, then wrote the key into it
+with a second redirection. Between the two, a process running as `caml`
+(any framework's code) could replace the file with a symlink, and root
+would then write, and truncate, whatever it pointed to. **Fix**: every
+write now happens as `caml` (`as_caml ... bash -c "$SECRETS_WRITER"`), into
+a `mktemp` file renamed into place, with the values sent over a pipe from
+`printf` (a builtin), so a key never appears on a command line or in
+`/proc/*/cmdline`. Root never sources the file: `--check` runs in `caml`'s
+login shell, and `--import` parses the uploaded file as text, without
+evaluating it.
+
+### Hidden input has to be tested on a real terminal
+
+`read -s` only hides input on a TTY, and `ssh -t` is what provides one.
+`tests/test_camlctl.py::test_secrets_interactive_input_is_hidden` runs
+`camlctl secrets` on a pseudo-terminal (`pty.openpty`), types a key and
+asserts that it never shows up in the output. Removing `-s` makes that test
+fail (mutation-checked). It waits 0.3 s after each prompt before typing:
+characters that arrive before `read` switches echo off get echoed by the
+terminal itself. CI's `server-e2e` also runs the prompt for real through
+`ssh -tt` and sudo. There it can't assert the key stays hidden, because the
+piped input arrives before echo is off, so it only checks that the key was
+stored, with a script that compares it in `caml`'s login shell.
+
+### Probing data without reading it
+
+An agent that runs `head data.csv` sends rows of the user's data to its
+provider. The operator profiles used to list "First lines: `head -n 5`".
+They now show the header line only. On the server, `describe-data`
+reports kinds, counts and flags. The only values it prints are the target's
+class labels, once a target is named, because the user has to confirm them.
+`tests/test_describe.py::test_the_text_report_carries_no_cell_values`
+checks that no other column's values reach the report. Two things the
+first draft got wrong:
+- A cancellation-date column, filled in only for the rows that churned, has
+  a single distinct value, so it came out as `constant` and was suggested
+  for dropping silently. Its emptiness is a perfect leak. There's now a
+  `one-value` kind (one value, or empty), and the leak check also tests
+  whether a column's emptiness matches the target classes.
+- Column names with spaces ("Full Name") can't cross an ssh command line
+  unquoted. `describe-data` numbers the columns, and `describe-data`,
+  `anonymize-data` and `prepare-data` accept a column's number wherever
+  they take its name.
+
+### Anonymization is pseudonymization
+
+`anonymize-data --hash` turns values into HMAC-SHA256 pseudonyms under a
+random key that is never stored: equal values stay equal (so a grouped
+split still works), and they can't be reversed or matched across runs. It
+removes direct identifiers. It can't stop combinations of ordinary columns
+(postcode, birth date, job) from singling people out, and both the command's
+output and the docs say so. The agent is told to present it that way and
+not to call the data "anonymous".

@@ -12,7 +12,7 @@
       "displayName": "CAML",
       "source": "./",
       "description": "Benchmark the major open-source AutoML frameworks on your own tabular data with CAML, driven from Windows, macOS or Linux: VPS setup, data preparation, sweeps, and an honest leaderboard.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": { "name": "Ali Tabatabaei" },
       "homepage": "https://github.com/A1i-Tabatabaei/CAML",
       "repository": "https://github.com/A1i-Tabatabaei/CAML",

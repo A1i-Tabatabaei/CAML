@@ -57,22 +57,76 @@ file; the operator profiles show the command for each OS), `encoding`,
 It refuses to overwrite a different file of the same name (exit 3) unless
 you add `--replace`.
 
+## Look before you prepare: `caml describe-data`
+
+Probe the file without printing its values:
+
+```bash
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn.csv
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn.csv --target churned
+```
+
+It prints `rows`, `columns`, `duplicate_rows`, then one numbered line per
+column: its kind (`integer`, `numeric`, `categorical`, `boolean`,
+`datetime`, `text`, `constant`, `one-value`, `empty`), missing share,
+distinct count, and flags:
+
+| Flag | Meaning | Usual action |
+|---|---|---|
+| `id-like` | Unique on every row | Drop it |
+| `pii?` | Its name or most of its values look like personal data (names, emails, phone numbers, addresses, IBANs, card or IP numbers) | Drop it, or hash it with `anonymize-data` |
+| `group-id?` | An ID column shared by several rows | Ask: must one ID's rows stay in one fold? Then a grouped split |
+| `date` | Dates | Ask about time order; drop it, or derive parts |
+| `free-text` | Long, mostly unique text | Usually drop it |
+| `constant`, `mostly-missing`, `high-cardinality` | As named | Drop constants; ask about the others |
+| `leak?` (with `--target`) | Predicts the target perfectly on its own, or whether it's empty does, or its name contains the target's | Ask whether it's known before the outcome |
+
+Without `--target` it lists `target_candidates`, with the task type each one
+implies. With `--target` it adds the task-type guess and why, the class labels
+and counts (the only cell values it ever prints), the smallest class's share,
+the default metric, imbalance advice, `suggest_drop` and `ask_user`. `--json`
+prints the same as JSON. Use it for the task card in
+[checkpoints.md](checkpoints.md#3-the-task-probe-then-confirm).
+
+Columns whose names have spaces or symbols can't cross an ssh command line
+unquoted, so pass them **by number**, the one `describe-data` prints:
+`--target 21`, `--drop 4`. That works in `describe-data`, `anonymize-data`
+and `prepare-data`.
+
+## Removing identifiers: `caml anonymize-data`
+
+```bash
+ssh caml-vps camlctl caml anonymize-data /home/caml/data/churn.csv --drop 2 --drop email --hash customer_id --out /home/caml/data/churn-anon.csv --delete-original
+```
+
+`--drop` removes a column. `--hash` replaces each value with `h_` plus 16
+hex digits of a salted SHA-256: equal values stay equal (so a grouped split
+still works), and the salt is random and never stored, so the pseudonyms
+can't be reversed or matched across runs. Missing values stay missing. The
+output defaults to `NAME-anon.csv` next to the input (mode 600), and
+`--delete-original` deletes the input and its `.orig` copy. It prints
+`key: value` facts and no values. It removes **direct** identifiers.
+Combinations of ordinary columns (postcode, birth date, job) can still
+single people out, so it isn't anonymization in the legal sense.
+
 ## `caml prepare-data`
 
 Run it on the server, through camlctl (the YAML it writes holds absolute
-server paths):
+server paths), once the user has confirmed the task:
 
 ```bash
-ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id --name churn --folds 5
+ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --type binary --drop customer_id --metric auc --name churn --folds 5
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--target COL` | required | The column to predict |
-| `--type auto\|binary\|multiclass\|regression` | `auto` | Task type. `auto` prints its reasoning; override it when that's wrong. |
+| `--target COL` | required | The column to predict, by name or number |
+| `--type auto\|binary\|multiclass\|regression` | `auto` | Task type. `auto` prints its reasoning; pass the type the user confirmed. |
 | `--folds K` | 5 | K-fold cross-validation, stratified for classification. `1` = one holdout split. |
 | `--test-size F` | 0.2 | Held-out share, only with `--folds 1` |
-| `--drop COL` | none | Remove a column before splitting (repeatable) |
+| `--drop COL` | none | Remove a column before splitting, by name or number (repeatable) |
+| `--keep COL` | none | Use only these feature columns, by name or number (repeatable; not with `--drop`). The target is always kept. |
+| `--metric NAME` | the task type's default | Metrics to score (repeatable). The first is the one frameworks optimize and the leaderboard ranks by. Written into the YAML and `dataset.json`. |
 | `--name NAME` | the file's name | Task name in `results.csv` (letters, digits, `_`, `-`) |
 | `--seed N` | 42 | Shuffle seed. The same seed and file give identical folds. |
 | `--out DIR` | `<repo>/input/datasets` | Where the dataset folder goes (`input/` is gitignored) |
@@ -123,8 +177,10 @@ frameworks the same way, much faster. If you sample, say so in the report.
 Defaults: binary → `auc`, multiclass → `logloss`, regression → `rmse`. The
 first metric listed is the one frameworks are told to optimize (where they
 support it) and the one the leaderboard ranks by. The others are also
-computed and stored. To change them, add a `metric:` list under the task in
-the YAML:
+computed and stored. To change them, pass `--metric` to `prepare-data`
+(`--metric balacc --metric auc`), which checks that each one fits the task
+type. It writes a `metric:` list under the task in the YAML, which you can
+also edit by hand:
 
 ```yaml
 - name: churn

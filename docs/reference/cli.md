@@ -146,6 +146,40 @@ caml compare FLAML MLJARSupervised --benchmark test --constraint test
 caml compare FLAML TPOT GAMA LightAutoML --benchmark validation --constraint test
 ```
 
+## `caml describe-data <file> [--target COL] [--json]`
+
+**Added in 1.2.0.** Describes a CSV, TSV or Parquet file for an agent that
+has to propose a task and confirm it with the user, **without printing cell
+values**: rows, columns, duplicate rows, then per numbered column its kind
+(`integer`, `numeric`, `categorical`, `boolean`, `datetime`, `text`,
+`constant`, `one-value`, `empty`), missing share, distinct count and flags:
+`id-like`, `pii?` (personal data, by name or by value patterns: emails,
+phone numbers, IP addresses, URLs, IBANs, Luhn-valid card numbers),
+`group-id?`, `date`, `free-text`, `constant`, `mostly-missing`,
+`high-cardinality`. Without `--target` it lists target candidates with the
+task type each implies. With `--target` (a name or number) it adds the
+task-type guess and its reason, the target's class labels and counts (the
+only values it prints), the smallest class share, the default metric,
+imbalance advice and `leak?` flags: a feature that separates the classes on
+its own (a numeric feature's AUC of 0 or 1, a categorical feature whose
+values each map to one class, a column whose emptiness matches the classes),
+correlates at |r| ≥ 0.99 with a regression target, or has the target's name
+in its own. It ends with `suggest_drop`, `ask_user` and a `next:` line.
+Code: `src/caml/describe.py`; tests: `tests/test_describe.py`, including a
+check that no non-target value reaches the text report.
+
+## `caml anonymize-data <file> [--drop COL]... [--hash COL]... [--out FILE] [--delete-original]`
+
+**Added in 1.2.0.** Drops columns, and replaces the values of `--hash`
+columns with `h_` + 16 hex digits of an HMAC-SHA256 under a random key
+that's never stored. Equal values stay equal, and the pseudonyms can't be
+reversed or matched across runs. Missing values stay missing. Columns go by
+name or number. The output defaults to `<name>-anon.csv` (or `.parquet`)
+next to the input, mode 600, and it refuses to overwrite.
+`--delete-original` deletes the input and the `.orig` copy `camlctl dataset`
+keeps after a conversion. It prints `key: value` facts only. It removes direct
+identifiers, which isn't anonymization in the legal sense, and says so.
+
 ## `caml prepare-data <file> --target COL [options]`
 
 **Added 2026-10-24.** Turns one CSV, TSV or Parquet file into a CAML
@@ -159,11 +193,13 @@ version).
 
 | Option | Default | |
 |---|---|---|
-| `--target COL` | required | Column to predict (case-sensitive; close matches are suggested) |
+| `--target COL` | required | Column to predict (case-sensitive; close matches are suggested), or its 1-based number |
 | `--type auto\|binary\|multiclass\|regression` | `auto` | Printed with its reason. An integer target with ≤10 values becomes multiclass with a warning. |
 | `--folds K` | 5 | 1–20 |
 | `--test-size F` | 0.2 | Only with `--folds 1` |
-| `--drop COL` | — | Repeatable; IDs and leaky columns |
+| `--drop COL` | — | Repeatable; IDs and leaky columns; name or number |
+| `--keep COL` | — | Repeatable; use only these features (the target is always kept); not with `--drop` (since 1.2.0) |
+| `--metric NAME` | the type's default | Repeatable; written as the task's `metric:` list, the first one ranks and is optimized; checked against the task type (since 1.2.0) |
 | `--name NAME` | file stem | Sanitized to `[A-Za-z0-9_-]` |
 | `--seed N` | 42 | Same file + seed = identical folds |
 | `--out DIR` | `<repo>/input/datasets` | |

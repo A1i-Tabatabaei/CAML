@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "caml",
   "displayName": "CAML",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Benchmark the major open-source AutoML frameworks (AutoGluon, H2O, FLAML, TabPFN and more) on your own tabular data with CAML, driven from Windows, macOS or Linux: VPS setup, data preparation, sweeps, and an honest leaderboard.",
   "author": {
     "name": "Ali Tabatabaei",

@@ -74,7 +74,7 @@ step asks for the server's root password, which never goes through you.
 | Task | Command |
 |---|---|
 | File size | `ls -lh "/path/data.csv"` |
-| First lines | `head -n 5 "/path/data.csv"` |
+| Header line (column names only: don't print data rows) | `head -n 1 "/path/data.csv"` |
 | Encoding hint | `file -I "/path/data.csv"` (`camlctl dataset` checks it properly on the server) |
 | SHA-256 | `shasum -a 256 "/path/data.csv"` |
 | Upload | `scp "/path/My Data.csv" caml-vps:churn.csv` |
@@ -82,6 +82,9 @@ step asks for the server's root password, which never goes through you.
 | Download a bundle | `scp caml-vps:caml-bundles/NAME.tar.gz ~/caml-run/` |
 | Unpack it | `tar -xzf ~/caml-run/NAME.tar.gz -C ~/caml-run` |
 | Pause | `sleep 60` |
+| Keys file: create | Your file tool, at `~/caml-run/caml-secrets.env`, from `ssh caml-vps camlctl secrets --template` |
+| Keys file: open it for the user | `open -e ~/caml-run/caml-secrets.env` (TextEdit) |
+| Keys file: upload, then delete | `scp ~/caml-run/caml-secrets.env caml-vps:caml-secrets.env`, then `rm ~/caml-run/caml-secrets.env` |
 | Stay awake while you monitor | `caffeinate -i -t 21600` in the background (6 hours), or ask the user to keep the Mac plugged in |
 
 ## 5. Gotchas
@@ -114,9 +117,12 @@ step asks for the server's root password, which never goes through you.
   monitoring pauses while the Mac sleeps. Closing the lid sleeps the Mac
   even with `caffeinate` running, unless it's on power with an external
   display.
-- **The TabPFN key** needs a real terminal. The user runs
-  `ssh -t caml-vps camlctl tabpfn-token` in Terminal themselves, not
-  through your shell tool.
+- **API keys** need a real terminal. The user runs
+  `ssh -t caml-vps camlctl secrets` in Terminal themselves, not through your
+  shell tool ([checkpoints.md](checkpoints.md) §2). If they'd rather fill in
+  `caml-secrets.env`, TextEdit opens it as plain text. Tell them not to type
+  quotes: TextEdit's smart quotes turn them into curly ones (the import
+  strips both kinds, but it's one less thing to go wrong).
 
 ## Developers: provisioning from a clone
 

@@ -136,7 +136,8 @@ def test_help_runs_without_root_and_names_the_ssh_shape(tmp_path: Path):
     assert r.returncode == 0
     assert "ssh caml-vps camlctl <command>" in r.stdout
     for command in ("info", "setup", "caml", "install", "dataset", "script", "start", "jobs",
-                    "logs", "wait", "stop", "status", "bundle", "tabpfn-token", "update", "version"):
+                    "logs", "wait", "stop", "status", "bundle", "secrets", "tabpfn-token", "update",
+                    "version"):
         assert re.search(rf"^  {re.escape(command)}\b", r.stdout, re.M), command
 
 
@@ -292,7 +293,7 @@ def test_dataset_moves_the_upload_and_describes_it(ctl: Ctl):
     assert info["columns"].startswith("3 ")
     assert info["rows"].startswith("3 ")
     assert info["status"] == "ok"
-    assert info["next"].startswith(f"camlctl caml prepare-data {dest} --target")
+    assert info["next"] == f"camlctl caml describe-data {dest}"
 
 
 def test_dataset_semicolon_crlf_bom_and_no_final_newline(ctl: Ctl):
@@ -403,14 +404,169 @@ def test_bundle_packs_results_datasets_and_job_logs(ctl: Ctl):
     assert ctl("bundle", "run1").returncode == 3
 
 
-def test_tabpfn_token_needs_a_terminal_and_check_never_prints_it(ctl: Ctl):
-    r = ctl("tabpfn-token")
-    assert r.returncode == 1
-    assert "ssh -t caml-vps camlctl tabpfn-token" in r.stderr
+def secret_states(output: str) -> dict[str, str]:
+    """`NAME: state (...)` lines from `camlctl secrets --check`."""
+    return {m.group(1): m.group(2) for m in re.finditer(r"^([A-Z][A-Z0-9_]*): (\w+)", output, re.M)}
+
+
+def source_secrets(ctl: Ctl, name: str) -> str:
+    """What a login shell of the caml user gets for NAME."""
+    r = subprocess.run(["bash", "-c", f'. "{ctl.home}/.caml-secrets"; printf %s "${{{name}:-}}"'],
+                       capture_output=True, text=True)
+    return r.stdout
+
+
+def test_secrets_need_a_terminal_and_check_lists_known_keys(ctl: Ctl):
+    r = ctl("secrets")
+    assert r.returncode == 1 and "ssh -t caml-vps camlctl secrets" in r.stderr
+    r = ctl("secrets", "--check")
+    assert r.returncode == 0
+    assert secret_states(r.stdout) == {"TABPFN_TOKEN": "missing"}
+    assert "(not created yet)" in r.stdout and "needed for TabPFN" in r.stdout
+    t = ctl("secrets", "--template").stdout
+    assert re.findall(r"^([A-Z_]+)=$", t, re.M) == ["TABPFN_TOKEN"]
+    assert "https://ux.priorlabs.ai" in t
+
+
+def test_secrets_import_reads_a_hand_edited_file_and_never_prints_values(ctl: Ctl):
+    upload = ctl.uploads / "caml-secrets.env"
+    text = ("# CAML credentials\r\n"
+            "TABPFN_TOKEN=tok-123 # pasted from the website\r\n"
+            'export HF_TOKEN = "hf-a$b c"\r\n'
+            "OTHER_KEY=\r\n"
+            "PLACEHOLDER_KEY=REPLACE_WITH_YOUR_TABPFN_API_KEY\r\n"
+            "sk-pasted-without-a-name\r\n"
+            "lower_name=zzz-hidden\r\n")
+    upload.write_bytes(b"\xef\xbb\xbf" + text.encode())          # Notepad: BOM and CRLF
+    r = ctl("secrets", "--import", "caml-secrets.env")
+    assert r.returncode == 0, r.stderr
+    out = r.stdout + r.stderr
+    for value in ("tok-123", "hf-a", "sk-pasted", "zzz-hidden", "pasted from"):
+        assert value not in out
+    assert "TABPFN_TOKEN: imported (7 characters)" in out and "HF_TOKEN: imported (8 characters)" in out
+    assert "OTHER_KEY: empty, skipped" in out and "PLACEHOLDER_KEY: still the placeholder" in out
+    assert "line 6: not a NAME=value line" in out and "line 7: not a NAME=value line" in out
+    assert not upload.exists() and "deleted:" in out
+    secrets = ctl.home / ".caml-secrets"
+    assert secrets.stat().st_mode & 0o777 == 0o600
+    assert source_secrets(ctl, "TABPFN_TOKEN") == "tok-123"
+    assert source_secrets(ctl, "HF_TOKEN") == "hf-a$b c"           # quoted safely, never evaluated
+    assert "[ -f ~/.caml-secrets ] && . ~/.caml-secrets" in (ctl.home / ".profile").read_text()
+    r = ctl("secrets", "--check")
+    assert secret_states(r.stdout) == {"TABPFN_TOKEN": "set", "HF_TOKEN": "set"}
+    assert "tok-123" not in r.stdout
+    assert ctl("tabpfn-token", "--check").stdout.strip() == "token-set"
+
+
+def test_secrets_import_utf16_merges_and_refuses_an_unfilled_file(ctl: Ctl):
+    (ctl.uploads / "a.env").write_text("TABPFN_TOKEN=first\nHF_TOKEN=keep-me\n")
+    assert ctl("secrets", "--import", "a.env").returncode == 0
+    # PowerShell 5.1's > writes UTF-16 LE with a BOM.
+    (ctl.uploads / "b.env").write_bytes("TABPFN_TOKEN=second\r\n".encode("utf-16"))
+    assert ctl("secrets", "--import", "b.env").returncode == 0
+    assert source_secrets(ctl, "TABPFN_TOKEN") == "second" and source_secrets(ctl, "HF_TOKEN") == "keep-me"
+    assert (ctl.home / ".caml-secrets").read_text().count("TABPFN_TOKEN") == 1
+    (ctl.uploads / "d.env").write_text("EXTRA_KEY=\u201ccurly-val\u201d\n", encoding="utf-8")   # TextEdit
+    assert ctl("secrets", "--import", "d.env").returncode == 0
+    assert source_secrets(ctl, "EXTRA_KEY") == "curly-val"
+    (ctl.uploads / "c.env").write_text(ctl("secrets", "--template").stdout)
+    r = ctl("secrets", "--import", "c.env")
+    assert r.returncode == 1 and "nothing imported" in r.stderr and not (ctl.uploads / "c.env").exists()
+
+
+def test_secrets_remove_one_or_all_and_the_tabpfn_alias(ctl: Ctl):
+    (ctl.uploads / "a.env").write_text("TABPFN_TOKEN=t\nHF_TOKEN=h\n")
+    ctl("secrets", "--import", "a.env")
+    r = ctl("tabpfn-token", "--remove")
+    assert secret_states(r.stdout) == {"TABPFN_TOKEN": "missing", "HF_TOKEN": "set"}
     assert ctl("tabpfn-token", "--check").stdout.strip() == "token-missing"
     r = ctl("tabpfn-token", "--check", extra_env={"TABPFN_TOKEN": "s3cret-value"})
-    assert r.stdout.strip() == "token-set"
-    assert "s3cret" not in r.stdout + r.stderr
+    assert r.stdout.strip() == "token-set" and "s3cret" not in r.stdout + r.stderr
+    r = ctl("tabpfn-token")
+    assert r.returncode == 1 and "ssh -t caml-vps camlctl tabpfn-token" in r.stderr
+    assert ctl("secrets", "--remove", "--all").returncode == 0
+    assert not (ctl.home / ".caml-secrets").exists()
+    assert ctl("secrets", "--remove", "bad-name").returncode == 2
+
+
+def test_secrets_interactive_input_is_hidden(ctl: Ctl):
+    import pty
+    import select
+
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(["bash", str(CAMLCTL), "secrets"], cwd=ctl.uploads, env=ctl.env,
+                            stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+    os.close(slave)
+    buf, pos = b"", 0
+
+    def expect(token: bytes, timeout: float = 30) -> None:
+        nonlocal buf, pos
+        end = time.time() + timeout
+        while buf.find(token, pos) < 0:
+            ready, _, _ = select.select([master], [], [], max(0.0, end - time.time()))
+            assert ready, f"timed out waiting for {token!r}: {buf.decode(errors='replace')}"
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                chunk = b""
+            assert chunk, f"camlctl ended before {token!r}: {buf.decode(errors='replace')}"
+            buf += chunk
+        pos = buf.find(token, pos) + len(token)
+
+    def answer(text: str) -> None:
+        time.sleep(0.3)   # let `read -s` switch echo off first
+        os.write(master, text.encode() + b"\r")
+
+    try:
+        expect(b"TABPFN_TOKEN (hidden): ")
+        answer("tok-typed-in")
+        expect(b"received (12 characters)")
+        expect(b"press Enter to finish: ")
+        answer("EXTRA_KEY")
+        expect(b"EXTRA_KEY (hidden): ")
+        answer("  extra value  ")
+        expect(b"press Enter to finish: ")
+        answer("")
+        expect(b"secrets --check")
+        proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        while True:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+        os.close(master)
+    out = buf.decode(errors="replace")
+    assert proc.returncode == 0, out
+    assert "tok-typed-in" not in out and "extra value" not in out
+    assert source_secrets(ctl, "TABPFN_TOKEN") == "tok-typed-in"
+    assert source_secrets(ctl, "EXTRA_KEY") == "extra value"
+    assert re.search(r"^TABPFN_TOKEN: set", out, re.M) and re.search(r"^EXTRA_KEY: set", out, re.M)
+
+
+def test_script_can_use_a_frameworks_own_python(ctl: Ctl):
+    venv_bin = ctl.repo / "frameworks" / "FLAML" / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    fake_py = venv_bin / "python"
+    fake_py.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$PWD" "$@" > "{ctl.fake}/fwpy"\n')
+    fake_py.chmod(0o755)
+    (ctl.uploads / "fit.py").write_text("print('fit')\r\n")
+    r = ctl("script", "--framework", "FLAML", "fit.py", "--budget", "60")
+    assert r.returncode == 0, r.stderr
+    cwd, script, *args = (ctl.fake / "fwpy").read_text().splitlines()
+    assert cwd == str(ctl.repo) and script.endswith("/fit.py") and args == ["--budget", "60"]
+    assert "\r" not in Path(script).read_text()
+    assert ctl("script", "--framework", "TPOT", "fit.py").returncode == 1
+    (ctl.uploads / "fit.sh").write_text("echo hi\n")
+    assert ctl("script", "--framework", "FLAML", "fit.sh").returncode == 2
+    r = ctl("start", "fit", "script", "--framework", "FLAML", "fit.py")
+    assert r.returncode == 0, r.stderr
+    assert ctl.wait_done("fit").returncode == 0
 
 
 def test_setup_and_update_refuse_safely(ctl: Ctl):

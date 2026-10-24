@@ -19,6 +19,17 @@ and the ledger's `detail` field. The repo's
 | `camlctl wait` keeps exiting 124 | The job is still running | Keep waiting; `camlctl logs JOB` shows progress |
 | A job shows `lost` | The server rebooted, or the job was SIGKILLed | Start it again with the same arguments; sweeps resume |
 
+## Keys and the data
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `camlctl secrets` says it needs a terminal | It ran through your shell tool, or without `-t` | The user runs `ssh -t caml-vps camlctl secrets` in their own terminal window, or uses the file route ([checkpoints.md](checkpoints.md) §2) |
+| `secrets --check` says `missing` after the user typed a key | They pressed Enter without pasting, or pasted into the wrong window | Run it again. In Windows Terminal, paste with Ctrl+V or a right-click; nothing appears, which is expected |
+| `secrets --import` exits 1 with `nothing imported` | The file was uploaded before the user saved it, or every value was left empty | Ask the user to fill in and save it, then upload and import it again. The uploaded copy is already deleted |
+| `line N: not a NAME=value line` | A line without `=`, or a NAME not in capitals (for example a key pasted on its own line) | The user fixes that line (`TABPFN_TOKEN=...`). camlctl never echoes such lines |
+| `Target column 'x' not found` or `--drop column '4 x' not found` | A name with spaces or symbols, split by the ssh command line | Pass the column's number from `describe-data` instead (`--drop 4`) |
+| `Metric(s) ... don't apply to a binary task` | A metric for another task type (`rmse` for classification, `auc` for multiclass) | Use one from the list it prints; multiclass AUC is `auc_ovr` |
+
 ## Setup
 
 | Symptom | Cause | Fix |
@@ -29,7 +40,7 @@ and the ledger's `detail` field. The repo's
 | `Incorrect benchmark name or path` | A typo in the YAML path | Paths are relative to the repo (`input/datasets/NAME/NAME.yaml`), or absolute |
 | `X is not installed -- run caml install X first` | `caml sweep` checks every framework before it starts | `camlctl install X`, or drop X from the list |
 | `camlctl install` ends with `failed: X` | One framework's dependencies failed to resolve or build | `camlctl install --force X` to retry, and read its error (`camlctl logs install 200`). Network errors are usually transient. |
-| `TABPFN_TOKEN is not set (or is still the placeholder value)` | No token in the job's environment | [tabpfn.md](tabpfn.md) step 3. The export must be in `~/.profile`, not `~/.bashrc`. |
+| `TABPFN_TOKEN is not set (or is still the placeholder value)` | No key in the job's environment | `camlctl secrets --check`, then the user enters it ([checkpoints.md](checkpoints.md) §2). camlctl's loader is in `~/.profile`, not `~/.bashrc`. |
 | `TabPFNLicenseError` | The TabPFN-3 model license wasn't accepted | The user accepts it on ux.priorlabs.ai (Licenses tab) |
 
 ## Jobs that fail

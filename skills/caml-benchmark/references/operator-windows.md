@@ -89,13 +89,17 @@ serves all three. WSL has its own.
 |---|---|---|
 | OS version | `[Environment]::OSVersion.VersionString` | `cmd //c ver` |
 | Does the file exist, and how big? | `Get-Item "C:\path\data.csv" \| Select-Object Length` | `ls -l "/c/path/data.csv"` |
-| First lines | `Get-Content "C:\path\data.csv" -TotalCount 5` | `head -n 5 "/c/path/data.csv"` |
+| Header line (column names only: don't print data rows) | `Get-Content "C:\path\data.csv" -TotalCount 1` | `head -n 1 "/c/path/data.csv"` |
 | SHA-256 | `(Get-FileHash -Algorithm SHA256 "C:\path\data.csv").Hash.ToLower()` | `sha256sum "/c/path/data.csv"` |
 | Upload | `scp "C:\path\My Data.csv" caml-vps:churn.csv` | `scp "/c/path/My Data.csv" caml-vps:churn.csv` |
 | Report folder | `New-Item -ItemType Directory -Force C:\caml-run` | `mkdir -p /c/caml-run` |
 | Download a bundle | `scp caml-vps:caml-bundles/NAME.tar.gz C:\caml-run\` | `scp caml-vps:caml-bundles/NAME.tar.gz /c/caml-run/` |
 | Unpack it | `tar -xzf C:\caml-run\NAME.tar.gz -C C:\caml-run` | `cd /c/caml-run && tar -xzf NAME.tar.gz` |
 | Pause | `Start-Sleep -Seconds 60` | `sleep 60` |
+| Keys file: create | Your file tool, at `C:\caml-run\caml-secrets.env`, from `ssh caml-vps camlctl secrets --template` | the same, at `/c/caml-run/caml-secrets.env` |
+| Keys file: open it for the user | `notepad C:\caml-run\caml-secrets.env` | `notepad /c/caml-run/caml-secrets.env` |
+| Keys file: upload | `scp C:\caml-run\caml-secrets.env caml-vps:caml-secrets.env` | `scp /c/caml-run/caml-secrets.env caml-vps:caml-secrets.env` |
+| Keys file: delete | `Remove-Item C:\caml-run\caml-secrets.env` | `rm /c/caml-run/caml-secrets.env` |
 
 Compare hashes ignoring case: `Get-FileHash` prints upper case, `camlctl
 dataset` lower case. The `.ToLower()` above handles it.
@@ -134,9 +138,13 @@ dataset` lower case. The `.ToLower()` above handles it.
   device", or to copy the dataset elsewhere first.
 - **Long paths.** Unpack bundles into a short folder such as `C:\caml-run`.
   Deep result paths can pass Windows' 260-character limit.
-- **The TabPFN key** needs a real terminal. The user runs
-  `ssh -t caml-vps camlctl tabpfn-token` in Windows Terminal or PowerShell
-  themselves, not through your shell tool.
+- **API keys** need a real terminal. The user runs
+  `ssh -t caml-vps camlctl secrets` in Windows Terminal or PowerShell
+  themselves, not through your shell tool ([checkpoints.md](checkpoints.md)
+  §2). Pasting there is Ctrl+V or a right-click, and nothing appears: that's
+  expected. If they'd rather fill in `caml-secrets.env` in Notepad, create
+  it with your file tool, not `>`, which writes UTF-16 in PowerShell 5.1.
+  The import handles UTF-16 and CRLF anyway.
 - **Sleep.** A detached job keeps running on the server whatever the PC
   does; only your monitoring pauses. For live monitoring, the user sets
   sleep to "Never" while plugged in (Settings > System > Power).

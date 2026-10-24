@@ -5,6 +5,83 @@ All notable changes to CAML. The format follows
 [Semantic Versioning](https://semver.org/). The day-by-day engineering record
 is in [STATUS.md](STATUS.md) and [CLAUDE.md](CLAUDE.md).
 
+## [1.2.0] - 2026-10-24
+
+Three required check-ins between the agent and the user, and the commands
+that make them safe: the user enters API keys on the server themselves, and
+the agent probes the data without reading its values.
+
+### Added
+
+- **The three check-ins** (`skills/caml-benchmark/references/checkpoints.md`),
+  required in SKILL.md and in all three prompts. At each one the agent
+  stops and waits:
+  1. **The goal**: a benchmark study (the comparison is the result, for an
+     article, thesis or report) or the best model (for the rest of the
+     user's project). The answer sets the frameworks, folds, budget and
+     report.
+  2. **Credentials**: the user types API keys in themselves, or fills in a
+     file that the agent imports unread.
+  3. **The task**: the agent probes the data, anonymizes it if needed, and
+     proposes a task card (target, task type, features with each exclusion
+     explained, row structure, metric). `prepare-data` runs only after the
+     user confirms it.
+- **`camlctl secrets`**: interactive and hidden, run by the user with
+  `ssh -t caml-vps camlctl secrets`.
+  - `--check` prints `set`, `missing` or `placeholder`, never a value.
+  - `--template` prints a `caml-secrets.env` for users who prefer a file.
+    `--import FILE` reads it (comments, quotes, `export `, BOM, CRLF,
+    UTF-16 and smart quotes are all handled), stores the keys, deletes the
+    uploaded copy, and never echoes a line.
+  - `--remove NAME|--all` deletes keys.
+  - The key file is written by the `caml` user and never sourced by root.
+    `tabpfn-token` stays as the `TABPFN_TOKEN`-only alias.
+- **`caml describe-data`** (`src/caml/describe.py`): profiles a file without
+  printing cell values.
+  - Per numbered column: kind, missing share, distinct count, and flags
+    (`id-like`, `pii?` by name or value pattern, `group-id?`, `date`,
+    `free-text`, `constant`, `mostly-missing`, `high-cardinality`).
+  - Target candidates, each with the task type it implies.
+  - With `--target`: the class labels and counts, `leak?` flags (perfect
+    separation, emptiness that matches the classes, |r| ≥ 0.99, the
+    target's name in a column's), metric advice, `suggest_drop` and
+    `ask_user`.
+  - `--json` prints the same as JSON.
+- **`caml anonymize-data`**: `--drop` columns, and `--hash` IDs into salted
+  HMAC-SHA256 pseudonyms whose key is never stored, so equal values stay
+  equal. `--delete-original` deletes the input. It says plainly that this
+  removes direct identifiers only.
+- **`prepare-data`** options:
+  - `--keep COL` uses only these features.
+  - `--metric NAME`, repeatable, writes the task's `metric:` list, checked
+    against the task type.
+  - Columns go by name or by number (`--drop 4`), so names with spaces can
+    cross an ssh command line.
+- **`camlctl script --framework FW`** runs a `.py` with that framework's own
+  Python, for example to train the winner on all the data and bundle the
+  model (`references/reporting.md`, "Handing over the winner").
+- Two report templates in `references/reporting.md`: a benchmark study
+  (methods, limitations, references) and the best model (a one-page
+  recommendation).
+
+### Changed
+
+- The prompts' **My details** now ask for the goal, what to predict (or
+  "not sure") and whether the file holds personal data. Columns to drop,
+  row structure and the metric moved to the task card, so the agent asks
+  about them once it has seen the data.
+- The operator profiles show the header line only (`head -n 1`) instead of
+  the first rows, and the commands for creating, opening, uploading and
+  deleting the keys file on each OS.
+- `camlctl dataset` now points to `describe-data` as the next step.
+
+### Fixed
+
+- The old `tabpfn-token` wrote the key file as root inside the `caml` user's
+  home (`install`, then a separate write), which a process running as
+  `caml` could have redirected with a symlink. `secrets` writes it as
+  `caml`, through a pipe, so the key never appears on a command line.
+
 ## [1.1.0] - 2026-10-24
 
 Drive CAML from Windows, macOS or Linux, with AI agents in mind. CAML itself
@@ -154,6 +231,7 @@ First public release, under the Apache License 2.0.
   theme, plus `AGENTS.md`, `CITATION.cff`, `CONTRIBUTING.md`, `SECURITY.md`
   and CI.
 
+[1.2.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.2.0
 [1.1.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.1.0
 [1.0.1]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.1
 [1.0.0]: https://github.com/A1i-Tabatabaei/CAML/releases/tag/v1.0.0

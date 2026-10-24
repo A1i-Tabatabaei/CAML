@@ -1,9 +1,9 @@
 ---
 name: caml-benchmark
-description: Benchmark the major open-source AutoML frameworks (AutoGluon, H2O AutoML, FLAML, LightAutoML, MLJAR, TPOT, GAMA, FEDOT, SapientML, TabPFN) on a user's own tabular dataset with CAML, and report which one does best. Use when the user wants to train or compare AutoML models on their CSV/Parquet data, asks "which AutoML is best for my dataset", wants to run AMLB/OpenML AutoML benchmarks, or mentions CAML. Works from Windows, macOS or Linux; CAML itself always runs on an Ubuntu VPS, driven over SSH with one quote-free command (camlctl). Covers the VPS, preparing the data, the TabPFN API token, running and monitoring sweeps, reading the results honestly, a field report of problems hit, and citing CAML.
+description: Benchmark the major open-source AutoML frameworks (AutoGluon, H2O AutoML, FLAML, LightAutoML, MLJAR, TPOT, GAMA, FEDOT, SapientML, TabPFN) on a user's own tabular dataset with CAML, and report which one does best. Use when the user wants to train or compare AutoML models on their CSV/Parquet data, asks "which AutoML is best for my dataset", wants to run AMLB/OpenML AutoML benchmarks, or mentions CAML. Works from Windows, macOS or Linux; CAML itself always runs on an Ubuntu VPS, driven over SSH with one quote-free command (camlctl). Covers three required check-ins with the user (the goal: a benchmark study or the best model; API keys entered by the user, never through chat; the task, confirmed after probing the data without reading its values), the VPS, anonymizing and preparing the data, running and monitoring sweeps, reading the results honestly, a field report of problems hit, and citing CAML.
 license: Apache-2.0
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   repository: https://github.com/A1i-Tabatabaei/CAML
 ---
 
@@ -29,19 +29,30 @@ dataset and bundles the results, so you never nest quotes through ssh.
 
 Follow the phases in order. Each one ends with a check; don't move on until
 it passes. Where a step needs the user's decision, money or secrets, stop and
-ask.
+ask. Three of those stops are fixed, and you never skip them:
+
+| Check-in | When | Details |
+|---|---|---|
+| **1. The goal**: a benchmark study (the comparison is the result, for an article or report), or the best model (for the rest of their project)? | Your first message (Phase 0) | [checkpoints.md §1](references/checkpoints.md#1-the-goal-benchmark-study-or-best-model) |
+| **2. Credentials**: the user enters API keys on the server themselves | Right after setup (Phase 2) | [checkpoints.md §2](references/checkpoints.md#2-credentials-keys-go-to-the-server-never-through-chat) |
+| **3. The task**: target, task type, features, row structure and metric, confirmed by the user after you probe the data | Before `prepare-data` (Phase 4) | [checkpoints.md §3](references/checkpoints.md#3-the-task-probe-then-confirm) |
 
 ## Ground rules
 
 1. **Secrets never go through chat.** Never ask the user to paste a password,
-   SSH key or the `TABPFN_TOKEN` into the conversation, and never echo, log or
-   commit one. Give the user the command to run themselves
-   (`ssh -t caml-vps camlctl tabpfn-token` prompts silently).
-2. **The user's data stays where they allow.** Copying it to their own
-   server is part of the job, but confirm they're fine with that first. Never
-   send it anywhere else. `TabPFNClient` uploads the data to Prior Labs'
-   servers: include it **only** after the user explicitly agrees
-   ([references/tabpfn.md](references/tabpfn.md)).
+   SSH key or API key (`TABPFN_TOKEN`, ...) into the conversation, never put
+   one on a command line, and never echo, log, read or commit one. The user
+   enters keys themselves: `ssh -t caml-vps camlctl secrets` (input hidden),
+   or a `caml-secrets.env` file they fill in and you import unread
+   ([checkpoints.md §2](references/checkpoints.md#2-credentials-keys-go-to-the-server-never-through-chat)).
+2. **The user's data stays where they allow, and out of your context.**
+   Copying it to their own server is part of the job, but confirm they're
+   fine with that first, and remove personal data first if they want
+   ([checkpoints.md §3a](references/checkpoints.md#3a-personal-data-first)).
+   Never send it anywhere else. Probe it with `camlctl caml describe-data`,
+   which prints no cell values, rather than `head` or `cat`. `TabPFNClient`
+   uploads the data to Prior Labs' servers: include it **only** after the
+   user explicitly agrees ([references/tabpfn.md](references/tabpfn.md)).
 3. **Money is the user's call.** Renting a VPS costs money. Recommend a size,
    but let the user create it and give you the host. Remind them to delete
    it when you're done.
@@ -55,33 +66,45 @@ ask.
    workaround and gotcha in `caml-field-report-<os>.md`
    ([references/field-report.md](references/field-report.md)). It is how
    CAML gets fixed for the next user on this OS.
+7. **The user decides the goal and the task.** You probe, guess and
+   propose. They confirm. Never start a sweep on a task the user hasn't
+   confirmed.
 
-## Phase 0: Understand the task (ask, don't guess)
+## Phase 0: Ask before you plan (check-in 1: the goal)
 
-Get these answers before touching a server:
+Your first message, before you change anything on the server, covers:
 
-- **The data**: file path and format (CSV, TSV or Parquet; export Excel to CSV
-  first). Roughly how many rows and columns?
-- **The target**: which column to predict. Is it a category (classification)
-  or a quantity (regression)? A 0/1 or 1–5 integer column is ambiguous, so ask.
-- **Columns to drop**: row IDs, and **leaky columns**: anything only known
-  after the outcome (e.g. `refund_date` when predicting `churned`), or
-  derived from the target. Ask the user. Leakage makes every framework
-  look brilliant and the comparison meaningless.
-- **Row structure**: are rows independent? If they're **time-ordered** (sales
-  by date) or **grouped** (several rows per patient or customer), random
-  folds leak information. Use the manual split in
-  [references/data-preparation.md](references/data-preparation.md) instead
-  of `prepare-data`.
-- **What "best" means**: the default primary metric is AUC (binary), log loss
-  (multiclass) or RMSE (regression), with accuracy, balanced accuracy, R² and
-  MAE also reported. Heavily imbalanced classes usually call for balanced
-  accuracy. A metric can be changed in the YAML.
+- **The goal** (check-in 1). Ask whether this is a **benchmark study** (the
+  comparison itself is the result: they'll write about it in an article,
+  thesis or report) or about finding **the best model** to use in the rest
+  of their project, or both. Use the template in
+  [checkpoints.md §1](references/checkpoints.md#1-the-goal-benchmark-study-or-best-model).
+  If the prompt already says, confirm it in one line. The answer decides the
+  frameworks, folds, budget and report:
+
+  | | Benchmark study | Best model |
+  |---|---|---|
+  | Frameworks | All that can run, identical budgets, failures reported | Screen all, then the top 2–3 |
+  | Folds | 10 (5 on small data or a tight budget) | 5 |
+  | Budget | One constraint for all (`1h8c` if affordable) | `quick` screen, then `1h8c` for the top 2–3 |
+  | Report | Methods, full leaderboard, failures, citations | The winner, ties, trade-offs, how to use it |
+
+- **The data**: file path and format (CSV, TSV or Parquet; export Excel to
+  CSV first). Roughly how many rows and columns? **Does it contain personal
+  data, and has it been anonymized?** ([checkpoints.md §3a](references/checkpoints.md#3a-personal-data-first)).
+  Are they fine with it being copied to their server?
+- **What they want to predict**, if they know. Don't settle the details
+  yet: the task card in Phase 4 does that, after you've probed the data.
 - **Budget**: how long can a run take, and what can the server cost?
   Rough wall-clock is frameworks × folds × (time budget per job + about 3
-  minutes). For example, 9 frameworks × 3 folds × 5 minutes ≈ 3 hours.
-- **TabPFN**: does the user have, or want, a free Prior Labs token? Are they
-  allowed to send this data to a third-party API (`TabPFNClient`)?
+  minutes). For example, 9 frameworks × 5 folds × (5 + 3) minutes ≈ 6 hours.
+- **TabPFN**: do they want it (it needs a free Prior Labs key, entered at
+  check-in 2)? Are they allowed to send this data to a third-party API
+  (`TabPFNClient`)?
+- **Your plan** in under 10 lines (frameworks, folds, constraint, estimated
+  duration, which keys you'll need), shaped by the goal.
+
+Wait for the user's OK before Phase 2 changes anything on the server.
 
 ## Phase 1: Know your machine, reach the server
 
@@ -144,6 +167,23 @@ and `~caml/data`. It's idempotent.
 **Check**: `ssh caml-vps camlctl version` shows a CAML version, and
 `ssh caml-vps camlctl caml doctor` prints no `MISSING`.
 
+**Check-in 2: credentials**, as soon as setup is done (start the installs
+first if you like; they don't need keys):
+
+```bash
+ssh caml-vps camlctl secrets --check
+```
+
+If the plan needs a key that isn't `set` (TabPFN needs `TABPFN_TOKEN`), ask
+the user to run `ssh -t caml-vps camlctl secrets` **in their own terminal**.
+It asks for each key with the input hidden. Or, if they prefer an editor,
+create `caml-secrets.env` from `camlctl secrets --template` for them to fill
+in, then upload it and `camlctl secrets --import` it, which deletes the
+uploaded copy, and delete the local one. Never read that file once they've
+filled it in. The steps and message templates are in
+[checkpoints.md §2](references/checkpoints.md#2-credentials-keys-go-to-the-server-never-through-chat).
+Finish with `--check` again. If there's no key, take TabPFN out of the plan.
+
 (Developers deploying a local, uncommitted checkout use
 `scripts/provision_vps.sh caml-vps` from Linux, macOS, Git Bash or WSL
 instead; see [references/vps.md](references/vps.md).)
@@ -172,14 +212,14 @@ ssh caml-vps camlctl wait smoke 540
 
 It takes about 6 minutes and must print real scores, not NaN.
 
-**TabPFN** needs the token first: follow
+**TabPFN** needs `TABPFN_TOKEN` (check-in 2) and the user's decisions in
 [references/tabpfn.md](references/tabpfn.md). Skip TabPFN if the user has no
-token.
+key.
 
-## Phase 4: Prepare the data
+## Phase 4: The data (check-in 3: the task)
 
-Upload the file under a simple name (no spaces), then let `camlctl` take it
-in. The profile shows the local `scp` and hash commands for your OS:
+**Upload** the file under a simple name (no spaces), then let `camlctl` take
+it in. The profile shows the local `scp` and hash commands for your OS:
 
 ```bash
 scp "/path/on/your/machine/My Data.csv" caml-vps:churn.csv
@@ -197,36 +237,87 @@ columns, rows and header, ending with `status:`:
   printed `fix:` command.
 - `unsupported`: an `.xlsx` workbook. Ask the user to export a CSV UTF-8.
 
-Then split it:
+**Probe** it without reading its values:
 
 ```bash
-ssh caml-vps camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id --name churn --folds 5
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn.csv
 ```
 
-`prepare-data` prints the task type and why it chose it, the class counts,
-and warnings. **Read them back to the user and confirm the task type.** Fix
-it with `--type binary|multiclass|regression` if it's wrong. It reads
-semicolon-separated files and decimal commas (`1,5`). Useful options:
+It numbers the columns and gives each one a kind, missing share, distinct
+count and flags (`pii?`, `id-like`, `group-id?`, `date`, `free-text`,
+`constant`), then `target_candidates` with the task type each implies. It
+prints no cell values. Don't use `head`, `cat` or a script that prints rows.
+
+**Remove personal data** if it isn't anonymized yet and the user wants it
+gone (Phase 0). Show them the `pii?` and `id-like` columns, agree what to
+drop and what to hash, then:
+
+```bash
+ssh caml-vps camlctl caml anonymize-data /home/caml/data/churn.csv --drop 2 --drop email --hash customer_id --out /home/caml/data/churn-anon.csv --delete-original
+```
+
+Columns go by name, or by number when the name has spaces or symbols. It
+removes direct identifiers only. Combinations of ordinary columns can still
+identify people, so tell the user that
+([checkpoints.md §3b](references/checkpoints.md#3b-upload-then-remove-identifiers)).
+
+**Guess, then confirm the task (check-in 3).** Run `describe-data` again with
+the likely target. That adds its class labels and counts (the only values it
+prints), `leak?` flags, the default metric, imbalance advice, `suggest_drop`
+and `ask_user`:
+
+```bash
+ssh caml-vps camlctl caml describe-data /home/caml/data/churn-anon.csv --target Churn
+```
+
+Then send the user the **task card** and wait for "confirmed": the target
+(y) and what it means, the task type (binary, multiclass or regression), the
+feature columns (X), with each column you'd leave out and why, whether all
+the other features should be used, how rows relate (independent, grouped or
+ordered in time), the metric, and any rows left out. The template is in
+[checkpoints.md §3d](references/checkpoints.md#3d-the-task-card-ask-and-wait).
+Ask about every `leak?`, `group-id?` and `date` column. A 0/1 or 1–5
+integer target is ambiguous: ask whether it's a category or a quantity.
+**Never prepare an unconfirmed task.**
+
+**Prepare** exactly what the user confirmed:
+
+```bash
+ssh caml-vps camlctl caml prepare-data /home/caml/data/churn-anon.csv --target Churn --type binary --drop customer_id --drop refund_flag --metric auc --name churn --folds 5
+```
 
 | Option | Use |
 |---|---|
-| `--folds 5` (default) | Stratified k-fold for classification, plain k-fold for regression |
+| `--target COL` | The confirmed target, by name or number |
+| `--type binary\|multiclass\|regression` | The confirmed task type. Always pass it |
+| `--drop COL` (repeatable) | Leave out IDs, leaky and unwanted columns |
+| `--keep COL` (repeatable) | Use only these features (not with `--drop`) |
+| `--metric NAME` (repeatable) | The first ranks and is optimized: `auc`, `balacc`, `pr_auc`, `logloss`, `rmse`, `mae`, `r2`, ... |
+| `--folds 5` (default; 10 for a benchmark study) | Stratified k-fold for classification, plain k-fold for regression |
 | `--folds 1 --test-size 0.2` | One holdout split, for big data or a tight budget |
-| `--drop COL` (repeatable) | Remove IDs and leaky columns |
 | `--name NAME` | The task name in results (default: the file name) |
 | `--seed N` | A different split (default 42; record it) |
 | `--force` | Overwrite an earlier preparation of the same name |
 
-It writes `input/datasets/<name>/` in the repo: the fold CSVs, `<name>.yaml`
-(the benchmark definition) and `dataset.json` (the source's SHA-256, row
-counts and seed). From now on, pass `--benchmark input/datasets/<name>/<name>.yaml`.
-Details, validation errors and the manual YAML format are in
-[references/data-preparation.md](references/data-preparation.md).
+Column numbers are the ones `describe-data` prints. Read `prepare-data`'s
+output back against the card, and save the card and the command as
+`task.md` in the report folder. Rows that are **grouped** (several per
+customer or patient) or **ordered in time** need the manual split in
+[references/data-preparation.md](references/data-preparation.md) instead,
+because random folds leak across them.
+
+`prepare-data` writes `input/datasets/<name>/` in the repo: the fold CSVs,
+`<name>.yaml` (the benchmark definition) and `dataset.json` (the source's
+SHA-256, row counts, metrics and seed). From now on, pass
+`--benchmark input/datasets/<name>/<name>.yaml`.
 
 ## Phase 5: Run and monitor the sweep
 
-Choose the frameworks. The default is everything installed, minus the two
-special cases:
+Choose the frameworks and the budget **by the goal** (Phase 0): for a
+benchmark study, every framework that can run, under one constraint; for
+the best model, screen everything with `quick`, then re-run the top 2–3
+under `1h8c` with the same folds. The default list is everything installed,
+minus the two special cases:
 
 ```text
 AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML
@@ -331,8 +422,18 @@ Write the summary so it can't mislead:
   with its own API for production"; CAML compares frameworks, it doesn't
   deploy models.
 
-[references/reporting.md](references/reporting.md) has a report template
-and explains how to read `results.csv`.
+**Shape it by the goal.** A benchmark study gets the full report: methods
+(the confirmed task card, setup, versions, seeds, hardware), the complete
+leaderboard with spread, every failure, time against score, limitations and
+citations. For the best model, keep it to one page: the winner, which
+runners-up are within noise, the time and cost trade-off, and how to use
+it. If the user wants the trained model, fit the winner on all the data on
+the server with that framework's own Python
+(`camlctl start final script --framework AutoGluon fit_final.py`) and bundle
+it ([reporting.md](references/reporting.md#handing-over-the-winner-goal-b)).
+
+[references/reporting.md](references/reporting.md) has both report
+templates and explains how to read `results.csv`.
 
 ## Phase 8: Clean up
 
@@ -341,6 +442,8 @@ frameworks, their data in `~caml/data`, the prepared folds, the outputs) and
 ask whether to delete their data there. Remind them to **delete the VPS** in
 their provider's console; it bills while it exists. If they'll reuse it,
 `camlctl update` updates the code later and keeps the installed frameworks.
+If the server stays, ask whether to keep their keys there
+(`camlctl secrets --remove --all` deletes them).
 
 ## Phase 9: Hand over the field report
 
@@ -362,14 +465,14 @@ or remove it. Don't add it to documents that don't present CAML results.
   author  = {Tabatabaei, Ali},
   title   = {{CAML}: Benchmarking open-source AutoML frameworks in isolated environments},
   year    = {2026},
-  version = {1.1.0},
+  version = {1.2.0},
   url     = {https://github.com/A1i-Tabatabaei/CAML},
   license = {Apache-2.0}
 }
 ```
 
 Plain text: Tabatabaei, A. (2026). *CAML: Benchmarking open-source AutoML
-frameworks in isolated environments* (Version 1.1.0) [Computer software].
+frameworks in isolated environments* (Version 1.2.0) [Computer software].
 https://github.com/A1i-Tabatabaei/CAML
 
 AMLB: Gijsbers, P., Bueno, M. L. P., Coors, S., LeDell, E., Poirier, S.,
@@ -387,8 +490,13 @@ Every line runs from the user's machine, on any OS.
 | Health check | `ssh caml-vps camlctl caml doctor` |
 | Install frameworks (detached) | `ssh caml-vps camlctl start install install AutoGluon FLAML ...` |
 | What's installed | `ssh caml-vps camlctl caml status` |
+| Keys: what's set | `ssh caml-vps camlctl secrets --check` |
+| Keys: the user enters them | `ssh -t caml-vps camlctl secrets` (in their own terminal) |
+| Keys: from a filled-in file | `scp caml-secrets.env caml-vps:caml-secrets.env`, then `ssh caml-vps camlctl secrets --import caml-secrets.env` |
 | Take in the data | `scp FILE caml-vps:NAME.csv`, then `ssh caml-vps camlctl dataset NAME.csv` |
-| Prepare data | `ssh caml-vps camlctl caml prepare-data /home/caml/data/NAME.csv --target COL --name NAME` |
+| Probe it (no values printed) | `ssh caml-vps camlctl caml describe-data /home/caml/data/NAME.csv --target COL` |
+| Remove identifiers | `ssh caml-vps camlctl caml anonymize-data /home/caml/data/NAME.csv --drop COL --hash COL --delete-original` |
+| Prepare data (after the user confirms) | `ssh caml-vps camlctl caml prepare-data /home/caml/data/NAME.csv --target COL --type TYPE --name NAME` |
 | Preview a sweep | `ssh caml-vps camlctl caml sweep FW... --benchmark YAML --constraint quick --dry-run` |
 | Run a sweep (detached) | `ssh caml-vps camlctl start sweep caml sweep FW... --benchmark YAML --constraint quick` |
 | Monitor | `ssh caml-vps camlctl status`, `ssh caml-vps camlctl wait sweep 540` |
@@ -396,4 +504,4 @@ Every line runs from the user's machine, on any OS.
 | Rank | `ssh caml-vps camlctl caml leaderboard --benchmark YAML --markdown` |
 | Results to your machine | `ssh caml-vps camlctl bundle NAME`, then `scp caml-vps:caml-bundles/NAME.tar.gz .` |
 | Compare across 2+ datasets | `ssh caml-vps camlctl caml compare FW1 FW2 ... --constraint quick` |
-| TabPFN key (the user runs it) | `ssh -t caml-vps camlctl tabpfn-token` |
+| Train the winner on all data | `ssh caml-vps camlctl start final script --framework FW fit_final.py` |

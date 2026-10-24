@@ -44,6 +44,16 @@ MAX_INT_CLASSES = 10
 # locales whose decimal mark is a comma; tab and '|' also turn up.
 CSV_SEPARATORS = (",", ";", "\t", "|")
 _SEPARATOR_NAMES = {",": "comma", ";": "semicolon", "\t": "tab", "|": "pipe"}
+# Metrics CAML can score per task type (caml.results); the first one a task
+# lists is the one frameworks optimize and the leaderboard ranks by.
+METRICS = {
+    "binary": ("auc", "logloss", "acc", "balacc", "f1", "f05", "f2", "pr_auc", "mean_pce", "max_pce"),
+    "multiclass": ("logloss", "acc", "balacc", "auc_ovr", "auc_ovo", "mean_pce", "max_pce"),
+    "regression": ("rmse", "mae", "r2", "mse", "msle", "rmsle"),
+}
+DEFAULT_METRICS = {"binary": ("auc", "logloss", "acc", "balacc"),
+                   "multiclass": ("logloss", "acc", "balacc"),
+                   "regression": ("rmse", "r2", "mae")}
 
 
 class PrepareError(ValueError):
@@ -65,6 +75,27 @@ class PrepareResult:
     dropped_columns: list[str] = field(default_factory=list)
     class_counts: dict[str, int] | None = None
     warnings: list[str] = field(default_factory=list)
+    metrics: list[str] | None = None
+
+
+def resolve_column(columns: Sequence[str], spec: str, what: str = "Column") -> str:
+    """A column named exactly ``spec``, or else its 1-based position.
+
+    ``caml describe-data`` numbers the columns, so a name with spaces or
+    symbols (which can't cross an ssh command line unquoted) can be passed
+    as its number instead: ``--drop 4``.
+    """
+    columns = [str(c) for c in columns]
+    if spec in columns:
+        return spec
+    if spec.isdigit() and 1 <= int(spec) <= len(columns):
+        return columns[int(spec) - 1]
+    close = difflib.get_close_matches(spec, columns, n=3)
+    hint = f" Did you mean: {', '.join(close)}?" if close else ""
+    raise PrepareError(
+        f"{what} {spec!r} not found.{hint} Use the exact name (case-sensitive) or its number from "
+        f"`caml describe-data`. Columns: {', '.join(columns[:30])}"
+    )
 
 
 def sanitize_name(name: str) -> str:
@@ -185,12 +216,14 @@ def _benchmark_yaml(result: PrepareResult, source: Path, sha256: str, train: lis
         f"# {result.rows} rows, {result.feature_columns} feature columns, target {result.target!r} ({result.task_type}).",
         "# Use it with any command that takes --benchmark, e.g.:",
         f"#   caml sweep FLAML AutoGluon --benchmark {result.benchmark_file} --constraint test",
-        "# To score with a different primary metric, add e.g. `metric: [balacc, auc]` under the task.",
+        "# The first `metric` is the one frameworks optimize and the leaderboard ranks by",
+        "# (default: auc for binary, logloss for multiclass, rmse for regression).",
         "---",
         "",
         f"- name: {result.name}",
         f"  description: {_yaml_str(f'Prepared from {source.name} by caml prepare-data')}",
         f"  folds: {result.folds}",
+        *([f"  metric: [{', '.join(result.metrics)}]"] if result.metrics else []),
         "  dataset:",
         f"    target: {_yaml_str(result.target)}",
         f"    type: {result.task_type}",
@@ -214,6 +247,8 @@ def prepare_dataset(
     test_size: float = 0.2,
     seed: int = 42,
     drop: Sequence[str] = (),
+    keep: Sequence[str] = (),
+    metrics: Sequence[str] = (),
     force: bool = False,
     caml_version: str | None = None,
 ) -> PrepareResult:
@@ -240,18 +275,18 @@ def prepare_dataset(
         raise PrepareError(f"Duplicate column names: {', '.join(dupes)}. Rename them first.")
     df.columns = [str(c) for c in df.columns]
 
-    if target not in df.columns:
-        close = difflib.get_close_matches(target, df.columns, n=3)
-        hint = f" Did you mean: {', '.join(close)}?" if close else ""
-        raise PrepareError(f"Target column {target!r} not found.{hint} Columns: {', '.join(df.columns[:30])}")
-    unknown_drop = [c for c in drop if c not in df.columns]
-    if unknown_drop:
-        raise PrepareError(f"--drop column(s) not found: {', '.join(unknown_drop)}")
+    target = resolve_column(df.columns, target, "Target column")
+    if drop and keep:
+        raise PrepareError("Use --drop or --keep, not both.")
+    drop = list(dict.fromkeys(resolve_column(df.columns, c, "--drop column") for c in drop))
+    keep = list(dict.fromkeys(resolve_column(df.columns, c, "--keep column") for c in keep))
     if target in drop:
         raise PrepareError("The target column can't also be dropped.")
+    if keep:
+        drop = [c for c in df.columns if c not in keep and c != target]
 
     warnings: list[str] = list(read_notes)
-    df = df.drop(columns=list(drop))
+    df = df.drop(columns=drop)
     missing_target = df[target].isna()
     dropped_rows = int(missing_target.sum())
     if dropped_rows:
@@ -274,6 +309,14 @@ def prepare_dataset(
         if task_type == "multiclass" and n_unique < 3:
             raise PrepareError(f"--type multiclass needs 3+ target values; found {n_unique} (use binary).")
 
+    metrics = list(dict.fromkeys(m.strip().lower() for m in metrics if m.strip()))
+    bad = [m for m in metrics if m not in METRICS[task_type]]
+    if bad:
+        raise PrepareError(
+            f"Metric(s) {', '.join(bad)} don't apply to a {task_type} task. "
+            f"Choose from: {', '.join(METRICS[task_type])}."
+        )
+
     class_counts = None
     min_rows = max(2 * folds, 10)
     if len(df) < min_rows:
@@ -292,7 +335,7 @@ def prepare_dataset(
         if counts.iloc[-1] / counts.iloc[0] < 0.05:
             warnings.append(
                 f"Strong class imbalance (smallest class {counts.iloc[-1]} vs largest {counts.iloc[0]} rows). "
-                "Consider adding `metric: [balacc, auc]` (binary) or `metric: [balacc, logloss]` to the YAML."
+                "Consider --metric balacc first (with --metric auc or --metric logloss after it)."
             )
 
     if task_type != "regression" and (
@@ -340,6 +383,7 @@ def prepare_dataset(
         dropped_columns=list(drop),
         class_counts=class_counts,
         warnings=warnings,
+        metrics=metrics or None,
     )
     Path(result.benchmark_file).write_text(_benchmark_yaml(result, source, sha256, train_paths, test_paths))
     provenance = {

@@ -6,7 +6,36 @@ keep it current as decisions are made or revised.
 
 ## Session handoff — read this first
 
-**Newest work (2026-10-24, evening): v1.1.0, Windows/macOS/Linux operators
+**Newest work (2026-10-24, night): v1.2.0, the three check-ins.** Ali:
+"some interactions must exist between the agent and the user": API keys
+through an `.env` file "or better yet, an interactive shell script that user
+runs ... (including the tabPFN api key)"; ask whether the goal is a
+benchmark study for an article/report or the best model for the rest of the
+project; and "ask the user explicitly what their task is" (binary,
+multiclass, regression, X and y, whether all features belong in) even after
+probing the data, anonymizing it first if needed. Then "push at the end".
+- **Design**: the agent stops and waits three times
+  (`skills/caml-benchmark/references/checkpoints.md`): the goal (first
+  message), credentials (after setup), the task card (after
+  `describe-data`, before `prepare-data`). Keys never pass through chat or
+  a command line: `ssh -t caml-vps camlctl secrets` (hidden prompt, run by
+  the user), or a `caml-secrets.env` the agent creates from `--template`
+  and imports unread (`--import` deletes the upload). The agent probes data
+  with `caml describe-data` (no cell values except the named target's
+  labels), and `caml anonymize-data` drops or HMAC-pseudonymizes
+  identifiers. Honest wording matters: it's pseudonymization, not
+  anonymization in the legal sense.
+- **Gotcha worth remembering**: a key in `~caml/.caml-secrets` reaches
+  camlctl and its scripts but **not** a framework unless that framework's
+  `__init__.py` lists it in `retained_env_vars` (`run_in_venv` builds a
+  minimal env). That's why `HF_TOKEN` was dropped from `SECRETS_KNOWN`.
+- `camlctl secrets` writes as `caml` and pipes values through `printf`.
+  Root never sources the file (the 1.1.0 `tabpfn-token` had a symlink race;
+  it's now an alias). Keep both properties.
+- Details: CHANGELOG [1.2.0], troubleshooting "The three check-ins",
+  KI-18.
+
+**Earlier (2026-10-24, evening): v1.1.0, Windows/macOS/Linux operators
 for AI agents.** Ali: "update this new repository to support windows, mac,
 and linux ... optimize it for ai agents ... the agent should first determine
 what os it's running on and then choose the right scripts and commands ...

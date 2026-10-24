@@ -127,6 +127,13 @@ def test_each_prompt_points_to_its_profile_and_field_report(slug: str):
     assert "references/field-report.md" in prompt
     assert "skills/caml-benchmark/SKILL.md" in prompt
     assert "My details" in prompt and "ssh caml-vps camlctl" in prompt
+    # The three check-ins (references/checkpoints.md): goal, credentials, task.
+    assert "references/checkpoints.md" in prompt
+    assert "- Goal: <benchmark study" in prompt and "best model" in prompt
+    assert "ssh -t caml-vps camlctl secrets" in prompt and "camlctl secrets --import" in prompt
+    assert "camlctl caml describe-data" in prompt and "task card" in prompt
+    assert "Prepare the data only after I confirm it" in prompt
+    assert "Personal data in the file:" in prompt
     others = [p for s, p in OSES.items() if s != slug]
     assert not any(o in prompt for o in others), "a prompt names another OS's profile"
     assert "```" not in prompt  # it must fit in one fenced block
@@ -136,8 +143,8 @@ def test_each_prompt_points_to_its_profile_and_field_report(slug: str):
 def test_operator_profiles_cover_the_essentials(slug: str):
     text = (REFS / OSES[slug]).read_text()
     for needle in ("ssh -o BatchMode=yes caml-vps echo ok", "## 2. SSH access", "## 3. The quoting rule",
-                   "## 4. Local commands", "## 5. Gotchas", "camlctl.md", "tabpfn-token",
-                   "Install nothing", "field report"):
+                   "## 4. Local commands", "## 5. Gotchas", "camlctl.md", "ssh -t caml-vps camlctl secrets",
+                   "Keys file: open it for the user", "checkpoints.md", "Install nothing", "field report"):
         assert needle in text, f"{OSES[slug]} is missing {needle!r}"
 
 
@@ -149,9 +156,41 @@ def test_skill_links_resolve():
         assert f"references/{name}" in text
 
 
+def test_checkpoints_cover_goal_credentials_and_task():
+    text = (REFS / "checkpoints.md").read_text()
+    for heading in ("## 1. The goal: benchmark study, or best model?",
+                    "## 2. Credentials: keys go to the server, never through chat",
+                    "## 3. The task: probe, then confirm", "### 3d. The task card: ask, and wait"):
+        assert heading in text
+    for needle in ("camlctl secrets --check", "ssh -t caml-vps camlctl secrets", "camlctl secrets --template",
+                   "camlctl secrets --import", "describe-data", "anonymize-data", "Don't run `prepare-data` until "
+                   "the user confirms", "--keep", "--metric", "task.md"):
+        assert needle in text, needle
+    skill = (SKILL / "SKILL.md").read_text()
+    assert skill.count("references/checkpoints.md") >= 4 and "Never prepare an unconfirmed task" in skill
+
+
+def _slug(heading: str) -> str:
+    """GitHub's anchor for a Markdown heading."""
+    text = re.sub(r"[^\w\- ]", "", heading.strip().lower())
+    return text.replace(" ", "-")
+
+
+def test_anchor_links_between_agent_docs_resolve():
+    bad, seen = [], 0
+    for doc in [SKILL / "SKILL.md", *sorted(REFS.glob("*.md"))]:
+        for target, anchor in re.findall(r"\]\(((?:references/)?[a-z-]+\.md)#([^)]+)\)", doc.read_text()):
+            path = (doc.parent / target) if not target.startswith("references/") else SKILL / target
+            headings = re.findall(r"^#+ (.+)$", path.read_text(), re.M)
+            seen += 1
+            if anchor not in {_slug(h) for h in headings}:
+                bad.append(f"{doc.name}: {target}#{anchor}")
+    assert seen > 10 and not bad, "\n".join(bad)
+
+
 def test_field_report_template_has_the_sections_agents_fill():
     text = (REFS / "field-report.md").read_text()
-    for section in ("## Environment", "## Summary", "## Problems", "## Gotchas",
+    for section in ("## Environment", "## Summary", "## Problems", "## Check-ins", "## Gotchas",
                     "## Docs: wrong, missing or unclear", "## What worked first time", "## Monitoring"):
         assert section in text
     assert (ROOT / ".github" / "ISSUE_TEMPLATE" / "field-report.md").is_file()

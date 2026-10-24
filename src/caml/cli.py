@@ -405,9 +405,64 @@ def leaderboard(benchmark_name: str | None, constraint_name: str | None, tasks: 
     click.echo("\n\n".join(leaderboard_mod.format_board(b, markdown=markdown) for b in boards))
 
 
+@main.command("describe-data")
+@click.argument("data_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--target", default=None,
+              help="The column to predict (name, or its number from a first run), if known.")
+@click.option("--json", "as_json", is_flag=True, help="Print the report as JSON instead of text.")
+def describe_data(data_file: str, target: str | None, as_json: bool):
+    """Describe a CSV/TSV/Parquet file without printing its values.
+
+    For each column: its kind, missing share, distinct count and flags
+    (identifier, constant, free text, date, possible personal data, possible
+    leak). Then target candidates, the task type each implies, and what to
+    confirm with the user. No cell values are printed, except the target's
+    class labels and counts once you name it.
+    """
+    import json
+
+    from . import describe as describe_mod
+
+    try:
+        report = describe_mod.describe_file(data_file, target=target)
+    except prepare_mod.PrepareError as e:
+        raise click.ClickException(str(e))
+    click.echo(json.dumps(report, indent=2) if as_json else describe_mod.format_report(report))
+
+
+@main.command("anonymize-data")
+@click.argument("data_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--drop", "drop_columns", multiple=True,
+              help="Column to remove (name or number). Repeatable. Use it for names, emails, phone numbers, addresses.")
+@click.option("--hash", "hash_columns", multiple=True,
+              help="Column whose values become irreversible pseudonyms (equal values stay equal). Repeatable. "
+                   "Use it for IDs you still need, e.g. to keep a customer's rows together.")
+@click.option("--out", "out_file", type=click.Path(dir_okay=False), default=None,
+              help="Output file (default: <name>-anon.csv next to the input).")
+@click.option("--delete-original", is_flag=True,
+              help="Delete the input file (and a NAME.orig kept by `camlctl dataset`) once the output is written.")
+def anonymize_data(data_file: str, drop_columns: tuple[str, ...], hash_columns: tuple[str, ...],
+                   out_file: str | None, delete_original: bool):
+    """Remove or pseudonymize identifying columns before anything else reads the data.
+
+    This removes direct identifiers. It doesn't make data anonymous in the
+    legal sense: combinations of ordinary columns (postcode, birth date,
+    job) can still single people out.
+    """
+    from . import describe as describe_mod
+
+    try:
+        res = describe_mod.anonymize_file(data_file, drop=drop_columns, hash_columns=hash_columns,
+                                          out=out_file, delete_original=delete_original)
+    except prepare_mod.PrepareError as e:
+        raise click.ClickException(str(e))
+    for key, value in res.items():
+        click.echo(f"{key}: {value}")
+
+
 @main.command("prepare-data")
 @click.argument("data_file", type=click.Path(exists=True, dir_okay=False))
-@click.option("--target", required=True, help="Name of the column to predict.")
+@click.option("--target", required=True, help="The column to predict: its name, or its number from describe-data.")
 @click.option("--name", default=None, help="Task name used in results (default: the file name).")
 @click.option("--type", "task_type", type=click.Choice(["auto", *prepare_mod.TASK_TYPES]), default="auto",
               show_default=True, help="Task type. `auto` infers it from the target and prints why.")
@@ -417,12 +472,19 @@ def leaderboard(benchmark_name: str | None, constraint_name: str | None, tasks: 
               help="Held-out share of rows, used only with --folds 1.")
 @click.option("--seed", type=int, default=42, show_default=True, help="Seed for the shuffle/split.")
 @click.option("--drop", "drop_columns", multiple=True,
-              help="Column to remove before splitting (IDs, leaky or post-outcome columns). Repeatable.")
+              help="Column to remove before splitting (IDs, leaky or post-outcome columns): name or number. Repeatable.")
+@click.option("--keep", "keep_columns", multiple=True,
+              help="Use only these feature columns (name or number; the target is always kept). Repeatable. "
+                   "Not together with --drop.")
+@click.option("--metric", "metrics", multiple=True,
+              help="Metric to score, repeatable; the first is the one frameworks optimize and the leaderboard ranks by "
+                   "(default: auc / logloss / rmse).")
 @click.option("--out", "out_dir", type=click.Path(file_okay=False), default=None,
               help="Where to write the dataset folder. Default: <repo>/input/datasets (gitignored).")
 @click.option("--force", is_flag=True, help="Overwrite an existing dataset folder of the same name.")
 def prepare_data(data_file: str, target: str, name: str | None, task_type: str, folds: int, test_size: float,
-                 seed: int, drop_columns: tuple[str, ...], out_dir: str | None, force: bool):
+                 seed: int, drop_columns: tuple[str, ...], keep_columns: tuple[str, ...], metrics: tuple[str, ...],
+                 out_dir: str | None, force: bool):
     """Turn one CSV/TSV/Parquet file into fold files + a benchmark YAML.
 
     The YAML works with every command that takes --benchmark (run, sweep,
@@ -435,7 +497,8 @@ def prepare_data(data_file: str, target: str, name: str | None, task_type: str, 
     try:
         res = prepare_mod.prepare_dataset(
             data_file, target, out, name=name, task_type=task_type, folds=folds, test_size=test_size,
-            seed=seed, drop=drop_columns, force=force, caml_version=__version__,
+            seed=seed, drop=drop_columns, keep=keep_columns, metrics=metrics, force=force,
+            caml_version=__version__,
         )
     except prepare_mod.PrepareError as e:
         raise click.ClickException(str(e))
@@ -445,6 +508,13 @@ def prepare_data(data_file: str, target: str, name: str | None, task_type: str, 
     click.echo(f"Type      {res.task_type}  ({res.type_reason})")
     click.echo(f"Target    {res.target}")
     click.echo(f"Data      {res.rows} rows, {res.feature_columns} feature columns, {split}")
+    if res.dropped_columns:
+        shown = ", ".join(res.dropped_columns[:12])
+        more = f" (+{len(res.dropped_columns) - 12} more)" if len(res.dropped_columns) > 12 else ""
+        click.echo(f"Dropped   {shown}{more}")
+    metrics_shown = res.metrics or list(prepare_mod.DEFAULT_METRICS[res.task_type])
+    origin = "" if res.metrics else " (the default)"
+    click.echo(f"Metric    {metrics_shown[0]} ranks{origin}; also {', '.join(metrics_shown[1:]) or 'none'}")
     if res.class_counts:
         shown = ", ".join(f"{k}: {v}" for k, v in list(res.class_counts.items())[:8])
         more = f" (+{len(res.class_counts) - 8} more)" if len(res.class_counts) > 8 else ""

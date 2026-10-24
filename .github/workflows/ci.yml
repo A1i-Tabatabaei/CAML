@@ -22,7 +22,7 @@ jobs:
       - name: Tests
         run: uv run pytest -q
       - name: Lint the modules added in 1.0
-        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py tests/test_lib_package.py tests/test_camlctl.py tests/test_agent_docs.py
+        run: uv run ruff check src/caml/prepare.py src/caml/describe.py src/caml/cli.py src/caml/leaderboard.py tests/test_prepare.py tests/test_describe.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py tests/test_lib_package.py tests/test_camlctl.py tests/test_agent_docs.py
       - name: Shellcheck the server and operator scripts
         run: shellcheck -S warning scripts/camlctl scripts/bootstrap_vps.sh scripts/setup_workspace.sh scripts/provision_vps.sh scripts/sync_vps.sh scripts/lib_package.sh scripts/teardown_workspace.sh tests/e2e/agent_flow.sh tests/operator/posix.sh
       - name: Linux operator checks

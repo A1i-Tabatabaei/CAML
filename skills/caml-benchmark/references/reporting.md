@@ -62,42 +62,153 @@ of thumb that keep a report honest:
 - **Training time is part of the result.** A framework that ties on score
   but trains 10× faster is often the better choice.
 
-## Report template
+## Report templates
 
-Fill this in from the leaderboard, `dataset.json`, the ledger and
-`results.csv`:
+The goal from check-in 1 ([checkpoints.md](checkpoints.md#1-the-goal-benchmark-study-or-best-model))
+decides the report's shape. Fill it in from the leaderboard, `task.md`,
+`dataset.json`, the ledger and `results.csv`.
+
+### Goal A: a benchmark study
+
+The comparison is the result, and the user will write about it, so give
+them everything they'd need to defend it:
 
 ```markdown
-## AutoML benchmark: <dataset name>
+# AutoML benchmark: <dataset name>
 
-**Question**: which AutoML framework predicts `<target>` best on <dataset>?
-**Setup**: <rows> rows, <columns> features, <task type>; <K>-fold stratified CV
-(seed <seed>); <constraint> budget (<seconds> s per fold, <cores> cores);
-server: <vCPU> vCPU, <RAM> GB RAM; CAML <app_version>.
+**Question**: how do open-source AutoML frameworks compare at predicting
+`<target>` on <dataset>?
 
+## Methods
+- **Task** (confirmed with the user, see task.md): <task type>; target
+  `<target>` (<what it means>); <n> features after leaving out <columns, and why>;
+  <rows> rows (<n> dropped: missing target); <anonymization, if any>.
+- **Evaluation**: <K>-fold <stratified> cross-validation, seed <seed>, the same
+  folds for every framework; primary metric <metric> (also <metrics>).
+- **Budget**: constraint <name>: <seconds> s per fold, <cores> cores, for every
+  framework.
+- **Hardware**: <vCPU> vCPU (<CPU model>), <RAM> GB RAM, <GPU or none>; one
+  job at a time.
+- **Software**: CAML <app_version>; <framework=version, ...>; data SHA-256 <from dataset.json>.
+
+## Results
 | rank | framework | <metric> mean | std | folds ok | train s |
 |---|---|---|---|---|---|
 | ... paste `caml leaderboard --markdown` ... |
 
-**Reading it**: <1-3 sentences: who leads, whether the gaps exceed the
-fold-to-fold spread, the time/score trade-off>.
+<2-4 sentences: who leads, which gaps exceed the fold-to-fold spread (the rest
+are ties), the time/score trade-off.>
 
-**Failures**: <framework>: <n> folds failed, <reason> (<limitation / budget / bug>).
-**Not run**: <e.g. TabPFNClient: not permitted to upload this data>.
+**Failures**: <framework>: <n> folds, <reason> (<framework limitation / budget or
+memory / CAML bug>). **Not run**: <framework: why>.
 
-**Next step**: <e.g. re-run AutoGluon and H2O AutoML under 1h8c; or train the
-winner on all data with its own API>.
+## Limitations
+- One dataset: these results say how the frameworks do on this data, not in
+  general. <If OpenML tasks were added: n datasets; `caml compare` result.>
+- Folds share training data, so per-fold differences aren't independent evidence.
+- <Budget: a short budget favors fast frameworks. Shared vCPUs, if any.>
 
-Framework versions: <framework=version, ...>. Data SHA-256: <from dataset.json>.
+## References
+CAML, AMLB and each compared framework (see "Citing CAML" in SKILL.md).
 ```
 
-Include CAML, AMLB and the compared frameworks in the references, and tell
-the user you did (see "Citing CAML" in SKILL.md).
+### Goal B: the best model
 
-## Turning a winner into a model
+The user wants a model to use, not a paper. Keep it to one page:
 
-CAML compares frameworks; it doesn't export a production model. To use the
-winner, install that framework in the user's own environment and train it
-on all of the data with its own API, using a similar budget (for example,
-`TabularPredictor(label=...).fit(df, time_limit=300)` for AutoGluon). The
-framework's page under `docs/frameworks/` shows how CAML calls it.
+```markdown
+# Best model for <target> on <dataset>
+
+**Recommendation**: <framework> (<metric> <mean> ± <std> over <K> folds, trained in
+<seconds> s per fold). <Runner-up> is within the fold-to-fold spread (<mean> ±
+<std>), so it's as good a choice if <it's faster / simpler / already in your stack>.
+
+| rank | framework | <metric> mean | std | folds ok | train s |
+|---|---|---|---|---|---|
+| ... the top 3-5 from `caml leaderboard --markdown` ... |
+
+**What to expect**: about <metric value> on new data like this. That's the
+cross-validated estimate; don't re-score the model on its own training data.
+
+**How to use it**: <the final model in final-model/<framework>/ with its README,
+or the snippet to train it in your project>. It needs <framework> <version> on
+Python <version>.
+
+**Caveats**: <failures, budget, anything the task card flagged>.
+Task: see task.md. Data SHA-256: <from dataset.json>. CAML <app_version>.
+```
+
+"Both" means the goal A report with goal B's recommendation and hand-over
+added at the end.
+
+Include CAML, AMLB and the compared frameworks in the references of anything
+written for others, and tell the user you did (see "Citing CAML" in SKILL.md).
+
+## Handing over the winner (goal B)
+
+CAML scores frameworks on folds and throws the fold models away. The user
+can get a usable model in two ways. Ask which one they want.
+
+**1. They train it in their own project** (the most common). Give them the
+framework, its version, the settings the benchmark used (time budget,
+metric, task type) and a snippet in the framework's own API.
+`frameworks/<FW>/exec.py` in the CAML repo shows exactly how CAML called it.
+For example:
+
+```python
+# AutoGluon
+from autogluon.tabular import TabularPredictor
+predictor = TabularPredictor(label="Churn", eval_metric="roc_auc").fit(train_df, time_limit=3600)
+
+# FLAML
+from flaml import AutoML
+automl = AutoML()
+automl.fit(X_train=X, y_train=y, task="classification", metric="roc_auc", time_budget=3600)
+```
+
+**2. You train it on the server and hand over the file.** Write
+`fit_final.py`: it loads all the rows (fold 0's train and test files
+together are the whole prepared dataset), fits the winner with the
+benchmark's settings, saves the model with the framework's own save method
+under `output/final-model/<FW>/`, and writes a `README.md` there (the
+framework and Python versions, and how to load it and predict). Run it with
+that framework's own Python, as a job:
+
+```bash
+scp fit_final.py caml-vps:fit_final.py
+ssh caml-vps camlctl start final script --framework FLAML fit_final.py
+ssh caml-vps camlctl wait final 540
+```
+
+A minimal FLAML version:
+
+```python
+# fit_final.py: train the winner on all the rows. Runs in frameworks/FLAML/venv,
+# from the repo root.
+import pickle
+import sys
+from pathlib import Path
+
+import flaml
+import pandas as pd
+
+data = Path("input/datasets/churn")
+df = pd.concat([pd.read_csv(data / "churn_train_0.csv"), pd.read_csv(data / "churn_test_0.csv")])
+X, y = df.drop(columns="Churn"), df["Churn"]
+automl = flaml.AutoML()
+automl.fit(X_train=X, y_train=y, task="classification", metric="roc_auc", time_budget=3600)
+out = Path("output/final-model/FLAML")
+out.mkdir(parents=True, exist_ok=True)
+with open(out / "model.pkl", "wb") as f:
+    pickle.dump(automl, f)
+(out / "README.md").write_text(
+    f"FLAML {flaml.__version__}, Python {sys.version.split()[0]}. Best estimator: {automl.best_estimator}.\n"
+    "Load: model = pickle.load(open('model.pkl', 'rb')); model.predict(new_df)\n")
+print("saved", out)
+```
+
+`camlctl bundle` includes `output/`, so the model comes back with the
+results. Tell the user that a pickled model loads only with the same
+framework version (and usually the same Python minor version) it was saved
+with, and that frameworks with their own save format (AutoGluon's
+`path=`, H2O's `h2o.save_model`) should use it.

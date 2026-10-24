@@ -124,7 +124,8 @@ From your machine, with `<host>` your server (or an SSH alias for it):
 ```bash
 scp churn.csv root@<host>:churn.csv
 ssh root@<host> camlctl dataset churn.csv
-ssh root@<host> camlctl caml prepare-data /home/caml/data/churn.csv --target churned --drop customer_id
+ssh root@<host> camlctl caml describe-data /home/caml/data/churn.csv --target churned
+ssh root@<host> camlctl caml prepare-data /home/caml/data/churn.csv --target churned --type binary --drop customer_id
 ssh root@<host> camlctl start install install AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML
 ssh root@<host> camlctl start sweep caml sweep AutoGluon FLAML H2OAutoML LightAutoML MLJARSupervised TPOT GAMA FEDOT SapientML --benchmark input/datasets/churn/churn.yaml --constraint quick
 ssh root@<host> camlctl status
@@ -134,13 +135,20 @@ ssh root@<host> camlctl caml leaderboard --benchmark input/datasets/churn/churn.
 - **`camlctl dataset`** moves the upload into `~caml/data`, prints its SHA-256,
   encoding, separator, columns and rows, and offers the fix for a non-UTF-8
   Excel export (`--from-encoding WINDOWS-1252`).
+- **`describe-data`** shows each column's kind, missing share, distinct count
+  and flags (row ID, possible personal data, possible leak, dates, grouped
+  rows), the task type the target implies and what to check, without printing
+  the data's values. `anonymize-data` drops identifying columns or replaces
+  IDs with irreversible pseudonyms.
 - **`camlctl start`** runs the installs and the sweep as detached jobs that
   survive your SSH session; wait for the install job to finish before you
   start the sweep (`camlctl wait install 540`).
 
 - **`prepare-data`** reads CSV, TSV or Parquet. It writes 5 stratified folds
   by default (`--folds 1` gives a single holdout), drops rows with a missing
-  target, and refuses classes too rare to appear in every fold. It always
+  target, and refuses classes too rare to appear in every fold. `--drop` or
+  `--keep` choose the features and `--metric` the ranking metric; columns
+  go by name or by number. It always
   writes the task type explicitly: a 0/1 integer target is a classification
   problem, and without the explicit type CAML's loader would treat it as
   regression. It prints why it chose the type, so you can override it with
@@ -318,16 +326,18 @@ Both TabPFN variants need a free Prior Labs API key in `TABPFN_TOKEN`:
    licenses on the Licenses tab (the TabPFN-3 model license is required by the
    local `TabPFN`), and copy an API key.
 2. Store it on the server for the `caml` user. Run this yourself, in your
-   own terminal. It asks for the key without showing it, so the key never
+   own terminal. It asks for each key without showing it, so the key never
    reaches your shell history, the repo or an agent's chat:
 
    ```bash
-   ssh -t root@<host> camlctl tabpfn-token
+   ssh -t root@<host> camlctl secrets
    ```
 
-   It writes the key to `~caml/.caml-secrets` (mode 600), which
-   `~caml/.profile` sources. `camlctl tabpfn-token --check` prints
-   `token-set` or `token-missing`, never the key.
+   It writes the keys to `~caml/.caml-secrets` (mode 600), which
+   `~caml/.profile` sources. `camlctl secrets --check` prints `set` or
+   `missing` for each key, never the key. To use a file instead,
+   `camlctl secrets --template` prints one to fill in, and
+   `camlctl secrets --import FILE` stores the keys from it and deletes it.
 3. `camlctl install TabPFN` (local) and/or `camlctl install TabPFNClient` (hosted).
 
 | | `TabPFN` (local) | `TabPFNClient` (hosted) |
@@ -385,7 +395,14 @@ can run commands on your computer. The agent:
 
 - confirms which OS and shell it's in, and reads the matching instructions
   from this repo;
-- sets up your Ubuntu server over SSH;
+- asks your **goal**: a benchmark study you'll write about, or the best
+  model for your project. The answer shapes the plan and the report;
+- sets up your Ubuntu server over SSH, and has **you** type in any API key
+  (TabPFN's), in your own terminal and never in the chat;
+- looks at your data's structure without reading its values, removes
+  personal data if you ask, and has you **confirm the task**: what to
+  predict, binary, multiclass or regression, which columns to use, and how
+  rows relate;
 - benchmarks your data, monitors the run, and writes an honest report.
 
 CAML always runs on the Ubuntu server; your computer only sends commands.
@@ -408,22 +425,24 @@ My details (if anything is blank or unclear, ask me in one message before you to
 - Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
 - Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
 - Dataset: <full path, e.g. C:\Users\me\Downloads\churn.csv>
-- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
-- Drop: <ID columns and anything only known after the outcome, or "ask me">
-- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
-- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Goal: <benchmark study: the comparison itself goes into my article, thesis or report | best model: I'll use the winner in the rest of my project | both | not sure>
+- What I want to predict: <column and what it means | not sure: suggest one>
+- Personal data in the file: <none | yes, already anonymized | yes, not anonymized yet>
 - Time budget: <e.g. results within 6 hours>
-- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- TabPFN: <skip | local TabPFN, non-commercial use | also TabPFNClient: I may upload this data to Prior Labs>
 - Report folder: <e.g. C:\caml-run>
 
 How to work:
-1. Find out which shell you're in (PowerShell, Git Bash, cmd or WSL; operator-windows.md shows how), and confirm this is Windows. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-windows.md (this PC: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+1. Find out which shell you're in (PowerShell, Git Bash, cmd or WSL; operator-windows.md shows how), and confirm this is Windows. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-windows.md (this PC: commands and gotchas), references/checkpoints.md (the three check-ins with me), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
 2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
-3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+3. Stop and wait for my answer at each of the three check-ins in checkpoints.md:
+   a. Goal: in your first message, confirm my goal (ask it if I left it blank), and send your plan in under 10 lines (frameworks, folds, constraint, estimated duration, which keys you'll need), shaped by the goal, with your questions. Wait for my OK before you change anything on the server.
+   b. Credentials: after setup, run `camlctl secrets --check`. If the plan needs a key that isn't set (TabPFN needs TABPFN_TOKEN), ask me to run `ssh -t caml-vps camlctl secrets` in my own terminal, where it hides what I type. If I'd rather use a file, create caml-secrets.env in my report folder from `camlctl secrets --template`, let me fill it in, then upload it, import it with `camlctl secrets --import`, and delete it. Never open, read or print that file once I've filled it in.
+   c. Task: after uploading my data, and removing personal data first if it isn't anonymized (agree the columns with me), probe it with `camlctl caml describe-data`, which never prints values. Then show me the task card: what to predict (y), the task type (binary, multiclass or regression), the feature columns (X) with each one you'd leave out and why, whether all the other features should be used, how rows relate (independent, grouped or ordered in time), and the metric. Prepare the data only after I confirm it.
 
 Rules:
-- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
-- My data goes to my server and nowhere else.
+- Never ask me for, or handle, passwords, private keys or API keys (the TabPFN key included). When one is needed, give me the command to run myself, or the file to fill in.
+- My data goes to my server and nowhere else, and its values stay out of this chat: use describe-data, not head or cat.
 - Creating, resizing or deleting servers, and anything else that costs money, is my call.
 - Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
 - Don't edit CAML's code to make something pass: work around it, and record it in the field report.
@@ -432,7 +451,7 @@ Rules:
 
 Field report (required): before your first command, create caml-field-report-windows.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this PC and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on Windows.
 
-Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-windows.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+Done means: every planned job is ok or its failure is explained; task.md (the confirmed task card), report.md (shaped by my goal, following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-windows.md are in my report folder, plus the trained model if I asked for one; and you've told me what's left on the server, which bills until I delete it.
 ```
 <!-- /prompt:windows -->
 
@@ -451,22 +470,24 @@ My details (if anything is blank or unclear, ask me in one message before you to
 - Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
 - Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
 - Dataset: <full path, e.g. /Users/me/Downloads/churn.csv>
-- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
-- Drop: <ID columns and anything only known after the outcome, or "ask me">
-- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
-- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Goal: <benchmark study: the comparison itself goes into my article, thesis or report | best model: I'll use the winner in the rest of my project | both | not sure>
+- What I want to predict: <column and what it means | not sure: suggest one>
+- Personal data in the file: <none | yes, already anonymized | yes, not anonymized yet>
 - Time budget: <e.g. results within 6 hours>
-- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- TabPFN: <skip | local TabPFN, non-commercial use | also TabPFNClient: I may upload this data to Prior Labs>
 - Report folder: <e.g. ~/caml-run>
 
 How to work:
-1. Confirm this is macOS (`uname -s` prints Darwin) and note the shell. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-macos.md (this Mac: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+1. Confirm this is macOS (`uname -s` prints Darwin) and note the shell. If it isn't, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-macos.md (this Mac: commands and gotchas), references/checkpoints.md (the three check-ins with me), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
 2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
-3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+3. Stop and wait for my answer at each of the three check-ins in checkpoints.md:
+   a. Goal: in your first message, confirm my goal (ask it if I left it blank), and send your plan in under 10 lines (frameworks, folds, constraint, estimated duration, which keys you'll need), shaped by the goal, with your questions. Wait for my OK before you change anything on the server.
+   b. Credentials: after setup, run `camlctl secrets --check`. If the plan needs a key that isn't set (TabPFN needs TABPFN_TOKEN), ask me to run `ssh -t caml-vps camlctl secrets` in my own terminal, where it hides what I type. If I'd rather use a file, create caml-secrets.env in my report folder from `camlctl secrets --template`, let me fill it in, then upload it, import it with `camlctl secrets --import`, and delete it. Never open, read or print that file once I've filled it in.
+   c. Task: after uploading my data, and removing personal data first if it isn't anonymized (agree the columns with me), probe it with `camlctl caml describe-data`, which never prints values. Then show me the task card: what to predict (y), the task type (binary, multiclass or regression), the feature columns (X) with each one you'd leave out and why, whether all the other features should be used, how rows relate (independent, grouped or ordered in time), and the metric. Prepare the data only after I confirm it.
 
 Rules:
-- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
-- My data goes to my server and nowhere else.
+- Never ask me for, or handle, passwords, private keys or API keys (the TabPFN key included). When one is needed, give me the command to run myself, or the file to fill in.
+- My data goes to my server and nowhere else, and its values stay out of this chat: use describe-data, not head or cat.
 - Creating, resizing or deleting servers, and anything else that costs money, is my call.
 - Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
 - Don't edit CAML's code to make something pass: work around it, and record it in the field report.
@@ -475,7 +496,7 @@ Rules:
 
 Field report (required): before your first command, create caml-field-report-macos.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this Mac and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on macOS.
 
-Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-macos.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+Done means: every planned job is ok or its failure is explained; task.md (the confirmed task card), report.md (shaped by my goal, following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-macos.md are in my report folder, plus the trained model if I asked for one; and you've told me what's left on the server, which bills until I delete it.
 ```
 <!-- /prompt:macos -->
 
@@ -494,22 +515,24 @@ My details (if anything is blank or unclear, ask me in one message before you to
 - Server: <SSH alias caml-vps, root key login works | IP address, key login not set up yet: walk me through it, I'll type the password myself>
 - Server size: <e.g. 8 vCPU / 32 GB RAM / 150 GB disk, at PROVIDER>
 - Dataset: <full path, e.g. /home/me/data/churn.csv>
-- Predict: <column> (<what it means>). Task: <classification / regression / not sure>
-- Drop: <ID columns and anything only known after the outcome, or "ask me">
-- Rows are: <independent / ordered in time by COLUMN / grouped by COLUMN>
-- "Best" means: <the default metric / balanced accuracy / RMSE / ...>
+- Goal: <benchmark study: the comparison itself goes into my article, thesis or report | best model: I'll use the winner in the rest of my project | both | not sure>
+- What I want to predict: <column and what it means | not sure: suggest one>
+- Personal data in the file: <none | yes, already anonymized | yes, not anonymized yet>
 - Time budget: <e.g. results within 6 hours>
-- TabPFN: <skip / local TabPFN, non-commercial use / also TabPFNClient: I may upload this data to Prior Labs>
+- TabPFN: <skip | local TabPFN, non-commercial use | also TabPFNClient: I may upload this data to Prior Labs>
 - Report folder: <e.g. ~/caml-run>
 
 How to work:
-1. Confirm this is Linux (`uname -s`), and whether it's WSL. If it isn't Linux, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-linux.md (this machine: commands and gotchas), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
+1. Confirm this is Linux (`uname -s`), and whether it's WSL. If it isn't Linux, tell me and use the matching profile instead. Then read these files from the CAML repo (clone it read-only, or read them on GitHub), in order: skills/caml-benchmark/SKILL.md (the runbook: follow its phases), skills/caml-benchmark/references/operator-linux.md (this machine: commands and gotchas), references/checkpoints.md (the three check-ins with me), references/camlctl.md (the one server command), references/field-report.md, and the other references when SKILL.md points to them.
 2. Drive the server only with `ssh caml-vps camlctl ...`, as the docs show. Run setup, the installs and the sweep as camlctl jobs, and check on them with `camlctl wait` or `camlctl status` every 20-30 minutes, never in a tight loop.
-3. Before you change anything on the server, send me your plan in under 10 lines (frameworks, folds, constraint, estimated duration) with your questions, and wait for my OK.
+3. Stop and wait for my answer at each of the three check-ins in checkpoints.md:
+   a. Goal: in your first message, confirm my goal (ask it if I left it blank), and send your plan in under 10 lines (frameworks, folds, constraint, estimated duration, which keys you'll need), shaped by the goal, with your questions. Wait for my OK before you change anything on the server.
+   b. Credentials: after setup, run `camlctl secrets --check`. If the plan needs a key that isn't set (TabPFN needs TABPFN_TOKEN), ask me to run `ssh -t caml-vps camlctl secrets` in my own terminal, where it hides what I type. If I'd rather use a file, create caml-secrets.env in my report folder from `camlctl secrets --template`, let me fill it in, then upload it, import it with `camlctl secrets --import`, and delete it. Never open, read or print that file once I've filled it in.
+   c. Task: after uploading my data, and removing personal data first if it isn't anonymized (agree the columns with me), probe it with `camlctl caml describe-data`, which never prints values. Then show me the task card: what to predict (y), the task type (binary, multiclass or regression), the feature columns (X) with each one you'd leave out and why, whether all the other features should be used, how rows relate (independent, grouped or ordered in time), and the metric. Prepare the data only after I confirm it.
 
 Rules:
-- Never ask me for, or handle, passwords, private keys or the TabPFN key. When one is needed, give me the command to run myself.
-- My data goes to my server and nowhere else.
+- Never ask me for, or handle, passwords, private keys or API keys (the TabPFN key included). When one is needed, give me the command to run myself, or the file to fill in.
+- My data goes to my server and nowhere else, and its values stay out of this chat: use describe-data, not head or cat.
 - Creating, resizing or deleting servers, and anything else that costs money, is my call.
 - Ask before deleting files, stopping a running sweep, or re-running more than an hour of jobs.
 - Don't edit CAML's code to make something pass: work around it, and record it in the field report.
@@ -518,7 +541,7 @@ Rules:
 
 Field report (required): before your first command, create caml-field-report-linux.md in my report folder from the template in references/field-report.md, and keep it up to date as you go. Record every error, bug, wrong or unclear doc, workaround and gotcha you hit, on this machine and on the server, when it happens: the exact command, the full error, the cause, the fix that worked, and what CAML should change. Also list what worked first time. Leave out secrets, my server's IP and my data's values. I'll send this file to the CAML maintainer, so that CAML works better on Linux.
 
-Done means: every planned job is ok or its failure is explained; report.md (following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-linux.md are in my report folder; and you've told me what's left on the server, which bills until I delete it.
+Done means: every planned job is ok or its failure is explained; task.md (the confirmed task card), report.md (shaped by my goal, following references/reporting.md), monitoring-log.md, the unpacked results bundle and caml-field-report-linux.md are in my report folder, plus the trained model if I asked for one; and you've told me what's left on the server, which bills until I delete it.
 ```
 <!-- /prompt:linux -->
 
@@ -558,7 +581,9 @@ also read [AGENTS.md](AGENTS.md).
 | `caml doctor` | Checks uv, system packages, disk, swap, stray H2O JVMs and the GPU |
 | `caml install <name>` / `--all` | Installs one framework, or all of them, into isolated venvs (`--force`, `--latest`) |
 | `caml status` | Shows each framework's pin, installed version, Python and compute mode |
-| `caml prepare-data <file> --target <col>` | Turns your CSV/TSV/Parquet file into folds and a benchmark YAML |
+| `caml describe-data <file> [--target <col>]` | Describes each column (kind, missing, distinct, flags for IDs, personal data, leaks, dates) and the task, without printing values |
+| `caml anonymize-data <file> --drop <col> --hash <col>` | Drops identifying columns, or replaces IDs with irreversible pseudonyms |
+| `caml prepare-data <file> --target <col>` | Turns your CSV/TSV/Parquet file into folds and a benchmark YAML (`--type`, `--drop`/`--keep`, `--metric`) |
 | `caml run <name> --benchmark B --constraint C` | Runs one framework (`--task`, `--fold`, `--seed`, `--keep-going`) |
 | `caml sweep <names...> --benchmark B --constraint C` | Runs frameworks × tasks × folds as isolated, resumable jobs (`--shard`, `--dry-run`, `--retry-failed`) |
 | `caml leaderboard [--benchmark B]` | Ranks frameworks per dataset (`--markdown`) |
@@ -578,11 +603,11 @@ From your own machine, these run through `camlctl` on the server
 | `caml ARGS...` | Runs `uv run caml ARGS...` as the `caml` user, in the repo |
 | `install FW...` | Installs several frameworks, keeping going past failures |
 | `dataset FILE` | Takes in an uploaded data file and describes it; converts non-UTF-8 exports |
-| `script FILE` | Runs an uploaded bash or Python script as `caml` (CRLF-safe) |
+| `script [--framework FW] FILE` | Runs an uploaded bash or Python script as `caml` (CRLF-safe), optionally with a framework's own Python |
 | `start JOB ...`, `jobs`, `logs`, `wait`, `stop` | Detached jobs that survive SSH drops |
 | `status` | Load, memory, disk, OOM kills, jobs and sweep progress on one screen |
 | `bundle` | Packs results, prepared datasets and logs into one `.tar.gz` for `scp` |
-| `tabpfn-token` | Stores the TabPFN key without it passing through chat |
+| `secrets` | The user types API keys in (input hidden), or imports a filled-in file; `--check` never prints them |
 | `update`, `version` | Updates the code; shows versions |
 
 The full reference: [camlctl.md](skills/caml-benchmark/references/camlctl.md).
@@ -626,7 +651,7 @@ repository"** button uses [CITATION.cff](CITATION.cff).
   author  = {Tabatabaei, Ali},
   title   = {{CAML}: Benchmarking open-source AutoML frameworks in isolated environments},
   year    = {2026},
-  version = {1.1.0},
+  version = {1.2.0},
   url     = {https://github.com/A1i-Tabatabaei/CAML},
   license = {Apache-2.0}
 }

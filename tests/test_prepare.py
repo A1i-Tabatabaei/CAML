@@ -264,3 +264,47 @@ def test_non_utf8_csv_gets_a_clear_error(tmp_path):
     src = _export(tmp_path / "legacy.csv", _rows().replace("label", "Ergebnis_\u00e4"), encoding="mac_roman")
     with pytest.raises(PrepareError, match="isn't UTF-8.*iconv"):
         prepare_dataset(src, "Ergebnis_\u00e4", tmp_path / "out", name="legacy", folds=2)
+
+
+# --- columns by number, --keep, --metric (1.2.0) ---------------------------------
+
+def test_columns_by_number_keep_and_metric(tmp_path):
+    src = tmp_path / "churn.csv"
+    df = _toy_frame().rename(columns={"plan": "Plan Type"})
+    df.to_csv(src, index=False)
+    # Column 4 is "Plan Type": a name that can't cross an ssh command line unquoted.
+    res = prepare_dataset(src, "5", tmp_path / "out", keep=["2", "4"], metrics=["balacc", "AUC"])
+    assert res.target == "churned"
+    assert res.feature_columns == 2 and set(res.dropped_columns) == {"customer_id", "income"}
+    assert res.metrics == ["balacc", "auc"]
+    yaml_text = (tmp_path / "out" / "churn" / "churn.yaml").read_text()
+    assert "  metric: [balacc, auc]" in yaml_text
+    train = pd.read_csv(tmp_path / "out" / "churn" / "churn_train_0.csv")
+    assert list(train.columns) == ["age", "Plan Type", "churned"]
+    assert json.loads((tmp_path / "out" / "churn" / "dataset.json").read_text())["metrics"] == ["balacc", "auc"]
+
+
+def test_metric_must_fit_the_task_and_drop_excludes_keep(tmp_path):
+    src = tmp_path / "churn.csv"
+    _toy_frame().to_csv(src, index=False)
+    with pytest.raises(PrepareError, match="don't apply to a binary task"):
+        prepare_dataset(src, "churned", tmp_path / "a", metrics=["rmse"])
+    with pytest.raises(PrepareError, match="not both"):
+        prepare_dataset(src, "churned", tmp_path / "b", drop=["age"], keep=["plan"])
+    with pytest.raises(PrepareError, match="describe-data"):
+        prepare_dataset(src, "churned", tmp_path / "c", drop=["9"])
+
+
+def test_caml_reads_the_metric_back(tmp_path):
+    from caml import resources
+    from caml.cli import _bootstrap_resources
+    from caml.paths import find_repo_root
+
+    src = tmp_path / "churn.csv"
+    _toy_frame().to_csv(src, index=False)
+    res = prepare_dataset(src, "churned", tmp_path / "out", folds=2, drop=["1"], metrics=["balacc", "auc"])
+    _bootstrap_resources(find_repo_root())
+    res_ = resources.get()
+    tasks, _, _ = res_.benchmark_definition(res.benchmark_file, res_.constraint_definition("test"))
+    task = next(t for t in tasks if t.name == "churn")
+    assert list(task.metric) == ["balacc", "auc"]

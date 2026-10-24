@@ -41,30 +41,35 @@ up as failed folds and why.
 
 ## 3. Store it on the server, outside chat and git
 
+This is check-in 2 in [checkpoints.md](checkpoints.md#2-credentials-keys-go-to-the-server-never-through-chat).
 The user runs this themselves, from their own terminal (PowerShell, Windows
 Terminal, macOS Terminal or a Linux terminal; not through the agent's shell
-tool, because it needs a real terminal). It prompts silently, so the token
-never appears on screen, in shell history or in the conversation:
+tool, because it needs a real terminal). It prompts with the input hidden,
+so the key never appears on screen, in shell history or in the conversation:
 
 ```bash
-ssh -t caml-vps camlctl tabpfn-token
+ssh -t caml-vps camlctl secrets
 ```
 
-It writes `export TABPFN_TOKEN=...` to `~caml/.caml-secrets` (mode 600) and
-sources that file from `~caml/.profile`. That's `~/.profile`, not
-`~/.bashrc`, because camlctl runs commands in a login shell, which reads
-`~/.profile`, and Ubuntu's default `~/.bashrc` returns early for
-non-interactive shells.
+Users who'd rather type the key into a file get `caml-secrets.env` from
+`camlctl secrets --template`; the agent uploads it unread and imports it
+with `camlctl secrets --import caml-secrets.env`, which deletes the
+uploaded copy. Either way, the key ends up as `export TABPFN_TOKEN=...` in
+`~caml/.caml-secrets` (mode 600), which `~caml/.profile` sources. That's
+`~/.profile`, not `~/.bashrc`, because camlctl runs commands in a login
+shell, which reads `~/.profile`, and Ubuntu's default `~/.bashrc` returns
+early for non-interactive shells.
 
-**Check**, without printing the token:
+**Check**, without printing the key:
 
 ```bash
-ssh caml-vps camlctl tabpfn-token --check
+ssh caml-vps camlctl secrets --check
 ```
 
-It prints `token-set` or `token-missing`.
+`TABPFN_TOKEN: set` means it's there. (`camlctl tabpfn-token --check`, from
+1.1.0, still prints `token-set` or `token-missing`.)
 
-If the user pasted a token into a chat, a log or a file by mistake, tell
+If the user pasted a key into a chat, a log or a file by mistake, tell
 them to revoke it and create a new one on ux.priorlabs.ai.
 
 ## 4. Install and smoke-test
