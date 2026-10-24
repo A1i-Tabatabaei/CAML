@@ -32,7 +32,12 @@ both private and public repos".
   VPS (`CAML_E2E_SOURCE=github tests/e2e/agent_flow.sh caml-vps`): do
   that on the pilot box first (KI-16).
 - `.gitattributes` (`* text=auto eol=lf`): Windows clones and their
-  `git archive` output would otherwise be CRLF (verified in a scratch repo).
+  `git archive` output would otherwise be CRLF (verified in a scratch repo,
+  then on CI's Windows runner).
+- CI's `server-e2e` found a real bug on its first run: a system-wide
+  `XDG_CONFIG_HOME` (GitHub's runner sets one) leaked to the `caml` user
+  through sudo and broke the uv installer. Every switch to `caml` now uses
+  `env -u XDG_...`. Keep that pattern in any new `sudo -u caml` call.
 - Details: troubleshooting "Windows, macOS and Linux as the operator
   machine", CHANGELOG [1.1.0].
 

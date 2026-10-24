@@ -57,6 +57,10 @@ still runs only on the Ubuntu 24.04 server.
   `core.autocrlf=true`, both the checkout and `git archive` turned the
   server scripts into CRLF, which bash on the server rejects. A new
   `.gitattributes` keeps LF everywhere.
+- **Setup on servers with system-wide `XDG_*` variables**: they reached the
+  `caml` user through sudo, and the uv installer failed writing to another
+  user's config directory. Found by the new `server-e2e` CI job on its
+  first run. Every switch to `caml` now drops inherited `XDG_*` variables.
 
 ### Changed
 

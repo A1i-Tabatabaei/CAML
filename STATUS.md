@@ -36,6 +36,14 @@ in the README, then commit and push to both repos.
   `operator-windows` (PowerShell 5.1 and 7), POSIX operator checks on macOS
   and Linux, and shellcheck. `tests/test_agent_docs.py` lints every
   documented `ssh` command for cross-shell safety.
+- **CI evidence** (first push): the Windows job confirmed LF despite
+  `core.autocrlf=true`, PowerShell 5.1's UTF-16 `Out-File` config being
+  unreadable by ssh, and `$HOME` expanding inside PowerShell double quotes.
+  The macOS job confirmed bash 3.2 and zsh pass the documented strings
+  unchanged. **`server-e2e` found a real bug on its first run**: a
+  system-wide `XDG_CONFIG_HOME` reached the `caml` user through sudo and
+  broke the uv installer. Fixed by dropping inherited `XDG_*` on every
+  switch to `caml` (troubleshooting has the details).
 - New open items: KI-16 (camlctl on a real VPS), KI-17 (agent-driven runs
   from Windows and macOS: the field reports).
 
