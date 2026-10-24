@@ -1,0 +1,90 @@
+[framework]
+name = "H2OAutoML"
+tier = 1
+project_url = "https://github.com/h2oai/h2o-3"
+license = "Apache-2.0"
+
+[python]
+# H2O-3's own docs (docs.h2o.ai, confirmed live 2026-07-30) state the Python
+# client supports "Python 3.7.x, 3.8.x, 3.9.x, 3.10.x, 3.11.x" -- no 3.12/3.13
+# support claimed anywhere, unlike every other Tier-1 framework so far. Pinned
+# to the documented ceiling rather than letting `uv` resolve to the newest
+# CANDIDATE_PYTHONS entry (3.13) and finding out empirically.
+range = ">=3.9,<3.12"    # resolves to 3.11
+
+[install]
+# H2O's own PyPI metadata (requests, tabulate) covers most deps; the one
+# steering pin needed is numpy. h2o doesn't declare numpy as a dependency at
+# all (it mostly moves data over REST + its own H2OFrame, only touching
+# pandas/numpy at the .as_data_frame() boundary), but CAML's own
+# frameworks/shared/requirements.txt installs numpy>=1.26 (-> numpy 2.x)
+# into every framework venv *before* framework-specific packages run -- and
+# H2O-3's own docs (docs.h2o.ai/h2o/latest-stable/h2o-docs/faq/python.html,
+# confirmed live 2026-07-30) state plainly "H2O-3 only supports numpy<2".
+# Same class of fix as MLJARSupervised's numba>=0.60 and TPOT's
+# setuptools<82 steering pins: a real, load-bearing constraint the
+# framework's own packaging doesn't declare for us.
+packages = ["h2o==3.46.0.11", "numpy<2"]
+
+[install.system_packages]
+# H2O-3 is a JVM application driven from Python via REST -- h2o.init() spawns
+# a local `java` child process running h2o.jar. docs.h2o.ai confirms Java SE
+# 8 through 17 are supported; Ubuntu 24.04's default archives don't carry
+# openjdk-8-jdk at all (the version AMLB's own setup.sh hardcodes), so we use
+# openjdk-17-jre-headless -- the newest version H2O-3 actually documents
+# support for, and a JRE (not JDK) is all a Python-driven client needs.
+# This is CAML's first apt system dependency; installer.py's
+# _ensure_apt_packages() (via `sudo -n apt-get install`) and the caml user's
+# NOPASSWD sudoers entry (scripts/bootstrap_vps.sh) were both written in
+# Phase 0 anticipating exactly this.
+apt = ["openjdk-17-jre-headless"]
+
+[version_check]
+pypi_package = "h2o"
+current_pin = "3.46.0.11"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+Pin/API verified live against PyPI (pypi.org/pypi/h2o/json) and
+docs.h2o.ai/h2o/latest-stable, 2026-07-30. See [python] and [install]
+comments above for the two real constraints not obvious from a bare
+`pip install h2o`: the <3.12 Python ceiling and the numpy<2 requirement.
+
+Verified on the real VPS, 2026-07-30: installed and ran cleanly on the
+first attempt (no bugs found, unlike every other Tier-1 framework so far).
+All 6 test-benchmark jobs produced real, plausible scores (kc2 AUC
+0.866/0.873, iris acc 1.000/1.000, cholesterol RMSE 45.47/54.72) --
+see docs/frameworks/h2o.md for full detail.
+
+Data flow: unlike AMLB's original exec.py (which passed through whatever
+raw format -- arff or csv -- OpenML happened to hand back, then had a
+retry-with-different-quotechar dance to cope with ARFF's ambiguous
+single/double-quote string delimiters), CAML's dataset accessors let us
+request an explicit format via `data_path("csv")` -- same pattern
+AutoGluon uses for parquet. Standardizing on CSV drops the entire ARFF
+quirk-handling block; H2O's own h2o.import_file() parses CSV without any
+of that ambiguity, and the `packaging` import that existed solely to
+version-gate the old ARFF retry logic is gone too.
+
+JVM lifecycle: h2o.init() spawns a local `java` child process; exec.py's
+finally block calls con.close() + con.local_server.shutdown() (ported from
+AMLB, which already gets this right) so a job timeout/crash doesn't leave
+an orphaned java process behind. `caml doctor` already has a
+`pgrep -f h2o.jar` stray-process check (built in Phase 0, ahead of this
+framework landing) -- run it after any interrupted/crashed job.
+
+**Feature-usage reporting** (added 2026-09-06): H2O AutoML doesn't do
+feature selection by design (H2O's own docs: "does not help feature
+engineering"), so `n_features_total`/`n_features_used`/`features_used` in
+`results.csv` always report all columns. Extraction reads `train.names`
+(the H2OFrame) rather than a pandas `X_train` -- this exec.py never
+materializes one (only file paths + `dataset.target.index` cross the IPC
+boundary). Caveat, not chased: if the StackedEnsemble's GLM metalearner
+happens to be the leader, it's technically L1/L2-regularized (sparse
+coefficients), but H2O never globally drops a column from the training
+frame, so "all columns" is still the correct report.
+"""

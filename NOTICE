@@ -1,0 +1,14 @@
+CAML
+Copyright 2026 Ali Tabatabaei
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software adapted from the OpenML AutoML Benchmark
+(https://github.com/openml/automlbenchmark), Copyright (c) 2018 OpenML,
+licensed under the MIT License. The MIT license text is in
+THIRD_PARTY_LICENSES/AMLB-LICENSE.txt, and NOTICE.md lists every adapted
+file and what changed.
+
+The AutoML frameworks CAML installs are separate projects under their own
+licenses. They are installed into isolated environments at run time and are
+not redistributed with CAML.

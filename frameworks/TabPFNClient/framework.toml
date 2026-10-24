@@ -1,0 +1,111 @@
+[framework]
+name = "TabPFNClient"
+tier = 1
+project_url = "https://github.com/PriorLabs/tabpfn-client"
+license = "Apache-2.0"
+# The hosted-API variant of TabPFN: compute runs on Prior Labs' servers and
+# data leaves the box (see gotchas). The sibling `TabPFN` framework runs the
+# same foundation model 100% locally via the OSS `tabpfn` package -- prefer
+# that one unless the box has no local compute. See docs/frameworks/tabpfn.md
+# (local) and docs/frameworks/tabpfn-client.md (this one).
+
+[python]
+range = ">=3.10,<3.14"    # tabpfn-client's own README states 3.10-3.13 support
+
+[install]
+# Pivoted from the local `tabpfn` package to Prior Labs' hosted-API client,
+# 2026-07-30, at the user's explicit direction after creating a Prior Labs
+# account + API key. This sidesteps the local package's license-gated
+# model-checkpoint download entirely (see STATUS.md's "Blocked" history and
+# this file's gotchas below) -- but changes what this framework actually
+# does: tabpfn-client sends training/test data to Prior Labs' servers for
+# processing ("your data will be sent to our servers for processing", their
+# own docs, confirmed live 2026-07-30) -- unlike every other framework in
+# this roster, which runs 100% locally. No torch dependency at all
+# (confirmed live via PyPI metadata: backoff, httpx, omegaconf, pandas,
+# pyarrow, pydantic, scikit-learn, tabpfn-common-utils, etc. -- all compute
+# is server-side), so the extra_index_urls CPU-wheel-forcing and
+# post_install_script weight pre-warming the old `tabpfn` package needed
+# are both gone.
+packages = ["tabpfn-client==0.3.3"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "tabpfn-client"
+current_pin = "0.3.3"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+Verified on the real VPS, 2026-07-30: installed and ran cleanly on the
+first attempt after the local-package-to-client pivot (no exec.py bugs
+found). All 6 test-benchmark jobs produced real, plausible scores (kc2
+AUC 0.859/0.910, iris acc 1.000/1.000, cholesterol RMSE 43.42/54.07) --
+see docs/frameworks/tabpfn.md for full detail.
+
+**Requires a TABPFN_TOKEN environment variable** -- a Prior Labs API key,
+free to create at https://ux.priorlabs.ai (register, accept the license
+under the Licenses tab, copy an API key from the account page). Read by
+tabpfn-client itself (via its own `get_opts().TABPFN_TOKEN`), not something
+CAML parses -- just needs to be present in the environment before exec.py's
+subprocess runs. See docs/operations/tabpfn-access.md for where the real
+value is stored (never committed) -- exec.py fails fast with a clear
+FrameworkError if it's unset or still the placeholder, rather than letting
+tabpfn-client's own auth error surface. `__init__.py` explicitly adds
+TABPFN_TOKEN to run_in_venv()'s retained_env_vars (default is just
+TMP/TEMP/TMPDIR) so it actually crosses the subprocess boundary.
+
+**Data leaves the machine.** Every other framework in this roster runs
+100% locally; tabpfn-client sends X_train/y_train/X_test to Prior Labs'
+API and gets predictions back over HTTPS/SSE. Fine for a benchmark
+harness whose whole job is comparing frameworks against public OpenML
+datasets, but worth remembering if CAML datasets ever include anything
+sensitive -- this is a materially different trust boundary than the rest
+of the roster. Also revisits the license note from the earlier local-
+`tabpfn` research pass (Prior Labs License's internal-benchmarking
+exemption was framed around "without external communication" -- this
+integration does external communication by design, so that framing no
+longer applies verbatim; not a problem for CAML's current internal-only
+use, just no longer the reason it's fine).
+
+**Rate limits / usage quotas apply** (server-side, tracked via
+X-RateLimit-* response headers, daily reset at 00:00 UTC; usage cost scales
+with dataset rows x columns). Irrelevant at the tiny `test` benchmark's
+scale (kc2/iris/cholesterol) but worth knowing before ever pointing this
+framework at a large/real benchmark suite. Per-model row/column/cell/class
+limits are also enforced server-side; the client validates and raises
+ValueError before sending if exceeded.
+
+**No GPU/CPU relevance for the client machine at all** -- all computation
+is server-side. When Phase 8's GPU auto-detection work happens, TabPFN
+should be explicitly skipped/excluded rather than wired up, since there's
+no local inference to accelerate.
+
+Still architecturally different from every other framework here: TabPFN
+does in-context inference over the training set in one forward pass, not a
+hyperparameter search, so config.max_runtime_seconds isn't spent by
+default. tabpfn-client does expose an opt-in "thinking mode"
+(thinking_mode=True + thinking_timeout_s, capped at 2400s server-side) for
+spending extra fit-time compute on higher precision -- not enabled here,
+but flows through automatically via the standard framework_params
+passthrough (**training_params) if a future benchmark config ever wants
+it.
+
+Constructor differences from the old local `tabpfn` package: no more
+`device`/`n_preprocessing_jobs` kwargs (both were specific to local
+in-process inference and don't exist on tabpfn-client's estimators --
+confirmed live against github.com/PriorLabs/tabpfn-client's
+src/tabpfn_client/estimator.py, 2026-07-30). `random_state` is still
+supported (default 0).
+
+**Feature-usage reporting** (added 2026-09-06): TabPFNClient has no
+feature-selection capability, so `n_features_total`/`n_features_used`/
+`features_used` in `results.csv` always report every original column
+(`used_columns=None`). Purely additive reporting -- doesn't change
+TabPFNClient's own behavior.
+"""

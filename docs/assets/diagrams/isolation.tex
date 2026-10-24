@@ -1,0 +1,31 @@
+\documentclass[border=10pt]{standalone}
+\input{styles}
+\begin{document}
+\begin{tikzpicture}
+
+  % per-framework isolated venv cards
+  \node[green]  (c1) {\Hd{AutoGluon}\\\Sb{py3.12 \textbullet\ torch-cpu}};
+  \node[slate, right=0.45cm of c1]  (c2) {\Hd{H2O AutoML}\\\Sb{py3.11 \textbullet\ JVM}};
+  \node[green, right=0.45cm of c2]  (c3) {\Hd{TabPFN}\\\Sb{py3.12 \textbullet\ torch, on-box}};
+  \node[amber, right=0.45cm of c3]  (c4) {\Hd{TabPFNClient}\\\Sb{py3.13 \textbullet\ hosted API}};
+  \node[purple, right=0.45cm of c4] (c5) {\Hd{SapientML}\\\Sb{py3.12 \textbullet\ lancedb}};
+  \node[card, right=0.45cm of c5]   (c6) {\Hd{+ 6 more}\\\Sb{FLAML \textbullet\ MLJAR \textbullet\ TPOT}\\\Sb{LightAutoML \textbullet\ FEDOT \textbullet\ GAMA}};
+
+  % orchestrator, centered above the row
+  \coordinate (mid) at ($(c1.north)!0.5!(c6.north)$);
+  \node[indigo, minimum width=15cm, above=2.4cm of mid, align=center] (orch)
+    {\Hd{caml orchestrator}\ \ {\normalfont\scriptsize\textcolor{muted}{one shared uv env \textbullet\ Python 3.12}}\\[3pt]
+     \Sbc{indigo}{CLI \quad\textbullet\quad dataset loader (OpenML / CSV) \quad\textbullet\quad scoring \& results aggregation}};
+
+  % subprocess boundary the arrows cross
+  \coordinate (bl) at ($(orch.south)!0.5!(mid)$);
+  \draw[dashed, line width=0.9pt, edge]
+    ($(c1.west |- bl)+(-0.35,0)$) -- ($(c6.east |- bl)+(0.35,0)$);
+  \node[alabel, text=edge] at (bl)
+    {\itshape subprocess boundary \textbullet\ dataset in, predictions out (JSON over stdin / stdout)};
+
+  \foreach \c in {c1,c2,c3,c4,c5,c6}
+    \draw[arrow] (orch.south -| \c) -- (\c.north);
+
+\end{tikzpicture}
+\end{document}

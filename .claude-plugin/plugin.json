@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "caml",
+  "displayName": "CAML",
+  "version": "1.0.0",
+  "description": "Benchmark the major open-source AutoML frameworks (AutoGluon, H2O, FLAML, TabPFN and more) on your own tabular data with CAML: VPS setup, data preparation, sweeps, and an honest leaderboard.",
+  "author": {
+    "name": "Ali Tabatabaei",
+    "url": "https://github.com/A1i-Tabatabaei"
+  },
+  "homepage": "https://github.com/A1i-Tabatabaei/CAML",
+  "repository": "https://github.com/A1i-Tabatabaei/CAML",
+  "license": "Apache-2.0",
+  "keywords": ["automl", "benchmark", "machine-learning", "tabular", "autogluon", "h2o", "flaml", "tabpfn"]
+}

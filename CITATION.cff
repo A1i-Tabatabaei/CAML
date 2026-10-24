@@ -1,0 +1,51 @@
+cff-version: 1.2.0
+message: "If you use CAML in your work, please cite it as below."
+title: "CAML: Benchmarking open-source AutoML frameworks in isolated environments"
+type: software
+authors:
+  - family-names: Tabatabaei
+    given-names: Ali
+version: 1.0.0
+date-released: 2026-10-24
+license: Apache-2.0
+repository-code: "https://github.com/A1i-Tabatabaei/CAML"
+url: "https://github.com/A1i-Tabatabaei/CAML"
+abstract: >-
+  CAML installs the major open-source AutoML frameworks (AutoGluon, H2O
+  AutoML, FLAML, LightAutoML, MLJAR-supervised, TPOT, GAMA, FEDOT, TabPFN,
+  SapientML) at pinned versions, each in its own isolated uv environment, and
+  benchmarks them on OpenML suites or a user's own tabular data with
+  resumable sweeps, per-dataset leaderboards and paired significance tests.
+  It is a from-scratch rewrite inspired by the OpenML AutoML Benchmark.
+keywords:
+  - automl
+  - benchmark
+  - machine learning
+  - tabular data
+  - reproducibility
+references:
+  - type: article
+    title: "AMLB: an AutoML Benchmark"
+    authors:
+      - family-names: Gijsbers
+        given-names: Pieter
+      - family-names: Bueno
+        given-names: Marcos L. P.
+      - family-names: Coors
+        given-names: Stefan
+      - family-names: LeDell
+        given-names: Erin
+      - family-names: Poirier
+        given-names: Sébastien
+      - family-names: Thomas
+        given-names: Janek
+      - family-names: Bischl
+        given-names: Bernd
+      - family-names: Vanschoren
+        given-names: Joaquin
+    journal: "Journal of Machine Learning Research"
+    volume: 25
+    issue: 101
+    start: 1
+    end: 65
+    year: 2024

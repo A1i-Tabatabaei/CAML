@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "caml",
+  "owner": {
+    "name": "Ali Tabatabaei",
+    "url": "https://github.com/A1i-Tabatabaei"
+  },
+  "description": "CAML: benchmark open-source AutoML frameworks on your own data",
+  "plugins": [
+    {
+      "name": "caml",
+      "displayName": "CAML",
+      "source": "./",
+      "description": "Benchmark the major open-source AutoML frameworks on your own tabular data with CAML: VPS setup, data preparation, sweeps, and an honest leaderboard.",
+      "version": "1.0.0",
+      "author": { "name": "Ali Tabatabaei" },
+      "homepage": "https://github.com/A1i-Tabatabaei/CAML",
+      "repository": "https://github.com/A1i-Tabatabaei/CAML",
+      "license": "Apache-2.0",
+      "keywords": ["automl", "benchmark", "machine-learning", "tabular"],
+      "category": "data"
+    }
+  ]
+}

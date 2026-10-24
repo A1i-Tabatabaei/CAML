@@ -1,0 +1,53 @@
+site_name: CAML
+site_description: Benchmark the major open-source AutoML frameworks on any tabular dataset
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Install the orchestrator: getting-started/install-orchestrator.md
+      - VPS bootstrap: getting-started/vps-bootstrap.md
+      - Benchmark your own data (agent skill): https://github.com/A1i-Tabatabaei/CAML/blob/main/skills/caml-benchmark/SKILL.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Framework plugin contract: architecture/framework-plugin-contract.md
+      - Version pinning policy: architecture/version-pinning-policy.md
+  - Frameworks:
+      - FLAML: frameworks/flaml.md
+      - MLJAR-supervised: frameworks/mljarsupervised.md
+      - AutoGluon: frameworks/autogluon.md
+      - TabPFN (local): frameworks/tabpfn.md
+      - TabPFN (hosted client): frameworks/tabpfn-client.md
+      - TPOT: frameworks/tpot.md
+      - H2O AutoML: frameworks/h2o.md
+      - LightAutoML: frameworks/lightautoml.md
+      - SapientML: frameworks/sapientml.md
+      - FEDOT: frameworks/fedot.md
+      - NaiveAutoML: frameworks/naiveautoml.md
+      - GAMA: frameworks/gama.md
+  - Operations:
+      - VPS runbook: operations/vps-runbook.md
+      - VPS access: operations/vps-access.md
+      - GPU support: operations/gpu.md
+      - Running sweeps: operations/sweeps.md
+      - Local storage drive: operations/local-storage.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Known issues (register): operations/known-issues.md
+      - E2E verification (2026-07-31): operations/e2e-verification.md
+  - Research:
+      - Paper plan: research/paper-plan.md
+  - Reference:
+      - CLI: reference/cli.md
+  - Contributing:
+      - Adding a framework: contributing/adding-a-framework.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - tables

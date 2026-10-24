@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install the orchestrator (no AutoML frameworks)
+        run: uv sync --locked
+      - name: Tests
+        run: uv run pytest -q
+      - name: Lint the modules added in 1.0
+        run: uv run ruff check src/caml/prepare.py src/caml/leaderboard.py tests/test_prepare.py tests/test_leaderboard.py tests/test_file_dataset_pipeline.py tests/test_cli.py

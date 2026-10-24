@@ -1,0 +1,127 @@
+[framework]
+name = "TPOT"
+tier = 1
+project_url = "https://github.com/EpistasisLab/tpot"
+license = "LGPL-3.0"
+
+[python]
+range = ">=3.10,<3.14"    # matches PyPI classifiers/requires-python for tpot 1.1.0
+
+[install]
+# AMLB has a TPOT reference (automlbenchmark-reference/frameworks/TPOT/),
+# but it targets the pre-rewrite TPOT API and does not work as-is against
+# current TPOT -- see the [notes].gotchas API-break writeup below. Pin/API
+# verified live against PyPI + github.com/EpistasisLab/tpot, 2026-07-29.
+# No torch, no extra system deps.
+#
+# `setuptools<82` is an explicit steering constraint, not a real TPOT dep:
+# tpot's `stopit` dependency does a bare `import pkg_resources` at import
+# time. Two compounding modern-tooling gaps, not one: (1) `uv venv`
+# (unlike stdlib venv) creates minimal environments with no setuptools/pip
+# preinstalled at all; (2) setuptools itself fully removed pkg_resources
+# starting 82.0.0 (2026-02-08) -- confirmed live via setuptools' own
+# changelog, 2026-07-29 -- so an unpinned `setuptools` resolves to a
+# version that doesn't help either. `stopit`'s last PyPI release predates
+# this by years and was never updated. Same class of fix as
+# MLJARSupervised's numba>=0.60 steering pin (see that framework.toml) --
+# a transitive dep's undeclared runtime assumption, not a version
+# conflict with anything CAML controls.
+packages = ["tpot==1.1.0", "setuptools<82"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "tpot"
+current_pin = "1.1.0"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+**`tpot.predict()` does not round-trip in the original label space** --
+unlike FLAML/MLJAR/AutoGluon's underlying libraries, TPOTClassifier's
+`.predict()` returns its own internal integer-encoded classes (e.g. 0/1),
+not the original y labels it was fit with, while `.predict_proba()` and
+`truth` both stay in the original label space. Found the hard way: this
+produced a real, 100%-reproducible `ResultError: y contains previously
+unseen labels` on every classification job until fixed. Fix: exec.py maps
+`predictions` through `tpot.classes_` (the standard sklearn attribute)
+right after calling `.predict()`, before returning them. Regression
+(TPOTRegressor) is unaffected -- no label space to mismatch.
+
+Needed `setuptools<82` as an explicit steering constraint (see
+`[install]` above) -- not a real TPOT dependency, but tpot's `stopit`
+sub-dependency does a bare `import pkg_resources` that fails on a
+`uv venv` (no setuptools preinstalled) with an unpinned/current setuptools
+(pkg_resources fully removed as of 82.0.0, 2026-02-08). Same class of fix
+as MLJARSupervised's `numba>=0.60` steering pin.
+
+
+**TPOT API break (2025 ground-up rewrite, internally "TPOT2"; PyPI package
+still just `tpot`, now at 1.1.0)** -- AMLB's reference exec.py targets the
+pre-rewrite API and will not run as-is. Confirmed live against
+github.com/EpistasisLab/tpot's current source, 2026-07-29:
+  - `config_dict=` constructor kwarg is gone entirely, replaced by
+    `search_space=` (e.g. "linear", "graph", "mdr"). exec.py uses
+    `search_space="linear"` (AMLB's own documented recommendation for
+    this rewrite) rather than trying to replicate the old sparse-data
+    config_dict special-case, which has no direct new-API equivalent.
+  - Single-metric scoring is now `scorers=[<name>]` +
+    `scorers_weights=[1]` (both lists -- the new API supports
+    multi-objective optimization) instead of a bare `scoring=<name>`
+    string. The underlying sklearn scorer name strings themselves
+    (accuracy, roc_auc, neg_log_loss, etc.) are unchanged.
+  - `tpot.evaluated_individuals_` (dict, trailing underscore) is now
+    `tpot.evaluated_individuals` (pandas DataFrame, no trailing
+    underscore) -- used for `models_count`.
+  - `fitted_pipeline_` is unchanged.
+  - AMLB's `save_artifacts()` introspected `pareto_front_fitted_pipelines_`
+    and `estimator._pareto_front` (both gone). The new
+    `evaluated_individuals` DataFrame already carries Pareto-front
+    membership as a column, so exec.py's artifact dump is simplified to
+    just write that DataFrame out rather than reconstructing the old
+    hall-of-fame format -- same debug intent (opt-in via
+    `_save_artifacts`), simpler mechanism.
+
+`predict_proba` still raises (RuntimeError or AttributeError, depending on
+what the optimized pipeline turned out to be) when the winning pipeline
+doesn't support it -- exec.py keeps AMLB's try/except fallback and
+__init__.py keeps the process_results one-hot-encoding fallback for that
+case, both ported as-is since this part didn't change.
+
+**Feature-usage reporting** (added 2026-09-06, verified on a real VPS run
+2026-09-10, extraction extended 2026-09-15): TPOT's `search_space="linear"`
+template (CAML's default) includes real sklearn selectors
+(SelectPercentile/SelectFwe/VarianceThreshold/RFE) as candidate pipeline
+steps, and genetic search can in principle pick a pipeline that drops
+columns. **Confirmed on a real fitted `tpot.fitted_pipeline_`**
+(kc2/iris/cholesterol, `test` benchmark): it genuinely is an
+`sklearn.Pipeline` as assumed. For these short 60s-budget fits, TPOT never
+actually chose a selector -- the pipeline came back as `[passthrough-1,
+passthrough-2, featureunion-1, featureunion-2, <final_estimator>]`, none of
+which expose `.get_support()` directly, so `used_columns_from_pipeline()`
+correctly fell back to "all columns used" (accurate, not a bug).
+
+**Extension (2026-09-15)**: the confirmed structural limitation --
+TPOT's linear template wraps each optional candidate step in a
+`Passthrough`/`FeatureUnion` slot, so a real selector likely lives *nested
+inside* a `FeatureUnion`'s `transformer_list` rather than as a bare
+top-level step -- is now handled. `used_columns_from_pipeline()` walks
+top-level steps looking for a selector-capable point, trusting a
+`FeatureUnion` only when it wraps EXACTLY ONE selector branch and every
+other branch is empty (`"drop"`/`None`) -- a union mixing a selector's
+output with another real transformer's output is still not trusted (stays
+a conservative "all columns used" fallback, since that shape can't be
+attributed to the selector alone). It also now tolerates literal
+`"passthrough"` steps before the selector (confirmed how TPOT represents an
+unused optional slot), not just a selector at literal step 0. Covered by
+unit tests against real fitted `sklearn.Pipeline`/`FeatureUnion` objects
+(`tests/test_feature_usage.py`); **not yet re-verified against a real TPOT
+fit that actually picks a nested selector** (these short test-benchmark
+fits still don't pick one) -- the extraction logic is confirmed correct
+against the exact shapes TPOT is known to produce, but a wider/longer real
+run choosing a real selector would be the strongest end-to-end check.
+"""

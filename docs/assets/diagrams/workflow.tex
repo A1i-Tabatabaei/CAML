@@ -1,0 +1,26 @@
+\documentclass[border=10pt]{standalone}
+\input{styles}
+\begin{document}
+\begin{tikzpicture}[node distance=1.45cm]
+
+  \node[card] (n0) {\Hd{your data}\\\Sb{one CSV / TSV / Parquet}\\\Sb{+ the target column}};
+  \node[indigo, right=of n0] (n1) {\Hd{\texttt{caml prepare-data}}\\\Sb{stratified folds}\\\Sb{task type checked}};
+  \node[slate, right=of n1] (n2) {\Hd{\texttt{caml install -{}-all}}\\\Sb{one uv venv}\\\Sb{per framework}};
+  \node[green, right=of n2] (n3) {\Hd{\texttt{caml sweep}}\\\Sb{framework \texttimes\ fold jobs}\\\Sb{resumable \textbullet\ failures kept}};
+  \node[purple, right=of n3] (n4) {\Hd{\texttt{caml leaderboard}}\\\Sb{ranked by mean score}\\\Sb{Markdown for reports}};
+
+  % everything after the upload runs on the box (the YAML holds absolute paths)
+  \begin{scope}[on background layer]
+    \node[draw=slate!70, dashed, line width=1pt, rounded corners=8pt,
+          fill=slate!5, fit=(n1)(n4), inner sep=13pt] (vps) {};
+  \end{scope}
+  \node[anchor=south, yshift=1pt] at (vps.north)
+    {\Sbc{slate}{\itshape on your Ubuntu VPS (\texttt{scripts/provision\_vps.sh} sets it up in one command)}};
+
+  \draw[arrow] (n0) -- (n1) node[alabel, midway, yshift=1pt] {\texttt{scp}};
+  \draw[arrow] (n1) -- (n2) node[alabel, midway, yshift=1pt] {\texttt{.yaml}};
+  \draw[arrow] (n2) -- (n3);
+  \draw[arrow] (n3) -- (n4) node[alabel, midway, yshift=1pt] {results\\.csv};
+
+\end{tikzpicture}
+\end{document}

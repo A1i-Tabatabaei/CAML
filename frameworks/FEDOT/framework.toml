@@ -1,0 +1,113 @@
+[framework]
+name = "FEDOT"
+tier = 2
+project_url = "https://github.com/aimclub/FEDOT"
+license = "BSD-3-Clause"
+
+[python]
+# fedot's own classifiers claim only Python 3.8-3.10 (confirmed live via
+# its setup.py at github.com/aimclub/FEDOT, tag v0.7.5, 2026-07-30) and
+# PyPI's requires_python is a loose ">=3.8" with no upper bound at all --
+# neither is the real constraint. The actual ceiling is transitive:
+# fedot==0.7.5 hard-pins `scipy<1.13.0` in its own requirements.txt, and
+# the newest matching release (scipy 1.12.0) has no cp313 wheel (confirmed
+# via PyPI's exact file listing -- wheels exist for cp39-cp312 only,
+# forcing a from-source build on 3.13). Same class of problem as
+# LightAutoML's statsmodels pin. Capping at <3.13 forces resolution to
+# 3.12, which has a real scipy 1.12.0 wheel.
+range = ">=3.11,<3.13"
+
+[install]
+# Deliberate deviation from AMLB (Locked Architecture Decision #5, see
+# CLAUDE.md): pinned to latest PyPI release, not git `master` --
+# AMLB's resources/frameworks.yaml tracks FEDOT's master HEAD, which is
+# not reproducible (upstream can change behavior with zero AMLB-side
+# commit). fedot==0.7.5 was the latest PyPI release as of 2026-07-30.
+#
+# API verified live against github.com/aimclub/FEDOT (fedot/api/main.py's
+# Fedot class, fedot/api/api_utils/params.py + api_params_repository.py),
+# 2026-07-30 -- despite FEDOT being far more actively developed than
+# TPOT/NaiveAutoML, no breaking drift found from AMLB's reference. Worth
+# actually having checked, not assumed: `metric`, `max_pipeline_fit_time`,
+# and `preset` are none of them named constructor params on `Fedot.__init__`
+# (they flow through **composer_tuner_params into ApiParams), and
+# ApiParamsRepository.check_and_set_default_params() raises a hard
+# `KeyError` for any key not in its `default_params` allowlist -- all
+# three are still present in that allowlist. `.fit()`/`.predict()`/
+# `.predict_proba()` signatures and `.current_pipeline.length` (inherited
+# from golem.core.dag.graph_delegate.GraphDelegate, confirmed present in
+# thegolem==0.4.1) are all unchanged too.
+#
+# fedot's own pinned sub-dependency thegolem==0.4.1 is pure-Python
+# (py3-none-any wheel) -- not a wheel-availability risk like scipy above.
+#
+# setuptools<82 steering pin (confirmed live on the real VPS, 2026-07-30 --
+# same class of fix as TPOT's identical pin): fedot's own hyperopt==0.2.7
+# sub-dependency does a bare `import pkg_resources` in hyperopt/atpe.py,
+# which raises ModuleNotFoundError on a bare `uv venv` -- unlike Python's
+# stdlib venv module, uv doesn't bundle setuptools at all by default, and
+# setuptools>=82.0.0 dropped pkg_resources entirely even when present.
+packages = ["fedot==0.7.5", "setuptools<82"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "fedot"
+current_pin = "0.7.5"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+Verified on the real VPS, 2026-07-30: one real install bug found and
+fixed (below), zero exec.py bugs -- the API-drift research paid off, the
+port worked first try once the environment-level issue was cleared.
+Scores: kc2 AUC 0.846/0.873 (acc 0.811/0.868, balacc 0.613/0.749), iris
+acc 0.933/1.000, cholesterol RMSE 42.57/53.67 -- all in line with every
+other verified framework in the roster.
+
+**Fixed**: ModuleNotFoundError: No module named 'pkg_resources', raised
+importing fedot itself (fedot -> golem.core.tuning.simultaneous ->
+hyperopt/atpe.py's bare `import pkg_resources`). Same class of fix as
+TPOT's identical setuptools<82 pin (see docs/frameworks/tpot.md): a bare
+`uv venv` doesn't bundle setuptools at all, and setuptools>=82.0.0 dropped
+pkg_resources entirely even when present. Added `setuptools<82` to
+`packages` -- resolved to setuptools==81.0.0, which still bundles
+pkg_resources. This is now the *second* framework in the roster needing
+this exact pin (TPOT was the first) -- worth checking for early if a
+future framework's install fails the same way.
+
+exec.py is a near-verbatim port of AMLB's frameworks/FEDOT/exec.py
+(run_fedot_tabular path only -- AMLB's separate exec_ts.py time-series
+path is out of scope, CAML's v1 roster is tabular classification/
+regression only). The one real addition beyond the AMLB reference is
+CAML's measure_inference_time wiring (same pattern as TPOT/LightAutoML),
+which AMLB's own FEDOT integration predates -- not exercised by the test
+benchmark (measure_inference_time defaults off), so it's ported on faith
+from the TPOT precedent rather than empirically verified end-to-end.
+
+dataset.train.y is passed un-squeezed (2D column-vector shape, CAML's
+default), matching AMLB's reference exactly -- unlike FLAML/MLJAR/TPOT,
+neither AMLB's FEDOT/exec.py nor NaiveAutoML's (the other array-based
+framework in this roster) squeeze it. Confirmed empirically fine: FEDOT's
+ApiDataProcessor.define_data() is not pickier about target shape than
+NaiveAutoML's equivalent path.
+
+Non-blocking log noise: every job logs "Topological features operation
+requires extra dependencies for time series forecasting, which are not
+installed. It can influence the performance." -- a FEDOT-internal warning
+about its ts-forecasting extras (fedot[extra]), irrelevant to CAML's
+tabular-only usage (see above). Harmless, not fixed.
+
+**Feature-usage reporting** (added 2026-09-06): FEDOT's RFE selector
+operations (`rfe_lin_class` etc.) are tagged `"non-default"` and excluded
+by the `best_quality` preset this exec.py always uses, unless
+`available_operations` explicitly lists them (not done). So
+`n_features_total`/`n_features_used`/`features_used` in `results.csv`
+report all columns under the current config. Enabling those RFE ops is a
+deliberate, separate decision (real behavior change to the search space),
+not done as part of this reporting feature.
+"""

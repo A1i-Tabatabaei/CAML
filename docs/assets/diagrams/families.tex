@@ -1,0 +1,43 @@
+\documentclass[border=10pt]{standalone}
+\input{styles}
+\begin{document}
+\begin{tikzpicture}[
+  chip/.style={base, fill=card, draw=muted!55, font=\small, minimum width=3.25cm},
+  ghdr/.style={base, font=\bfseries\small, text=white, minimum width=3.25cm,
+               align=center, soft shadow},
+]
+  % family headers, top-aligned
+  \node[ghdr, fill=indigo, draw=indigo] (g1) {Gradient-boosting\\ensembles};
+  \node[ghdr, fill=amber,  draw=amber,  right=1.05cm of g1] (g2) {Cost-frugal\\search};
+  \node[ghdr, fill=green,  draw=green,  right=1.05cm of g2] (g3) {Evolutionary /\\genetic};
+  \node[ghdr, fill=purple, draw=purple, right=1.05cm of g3] (g4) {Foundation\\model};
+  \node[ghdr, fill=rose,   draw=rose,   right=1.05cm of g4] (g5) {Code\\synthesis};
+
+  % chips beneath each header
+  \node[chip, below=0.4cm of g1] (a1) {AutoGluon};
+  \node[chip, below=0.22cm of a1] (a2) {H2O AutoML};
+  \node[chip, below=0.22cm of a2] (a3) {LightAutoML};
+  \node[chip, below=0.22cm of a3] (a4) {MLJAR-supervised};
+
+  \node[chip, below=0.4cm of g2] (b1) {FLAML};
+
+  \node[chip, below=0.4cm of g3] (c1) {TPOT};
+  \node[chip, below=0.22cm of c1] (c2) {GAMA};
+  \node[chip, below=0.22cm of c2] (c3) {FEDOT};
+
+  \node[chip, below=0.4cm of g4] (d1) {TabPFN {\scriptsize (local)}};
+  \node[chip, below=0.22cm of d1] (d2) {TabPFNClient};
+
+  \node[chip, below=0.4cm of g5] (e1) {SapientML};
+
+  % family containers
+  \begin{scope}[on background layer]
+    \node[draw=indigo!45, fill=indigo!5, rounded corners=8pt, fit=(g1)(a1)(a4), inner sep=9pt] {};
+    \node[draw=amber!45,  fill=amber!5,  rounded corners=8pt, fit=(g2)(b1),      inner sep=9pt] {};
+    \node[draw=green!45,  fill=green!5,  rounded corners=8pt, fit=(g3)(c1)(c3),  inner sep=9pt] {};
+    \node[draw=purple!45, fill=purple!5, rounded corners=8pt, fit=(g4)(d1)(d2),  inner sep=9pt] {};
+    \node[draw=rose!45,   fill=rose!5,   rounded corners=8pt, fit=(g5)(e1),      inner sep=9pt] {};
+  \end{scope}
+
+\end{tikzpicture}
+\end{document}

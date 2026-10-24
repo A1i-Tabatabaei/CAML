@@ -1,0 +1,75 @@
+# Pilot benchmark for the paper track (see docs/research/paper-plan.md):
+# a small but deliberately *diverse* slice of the real AMLB suites, run
+# across every framework before the main sweep, to shake out integration
+# bugs and measure real per-job time/RAM so the main sweep can be sized.
+#
+# Every task below is a member of the official AMLB OpenML suites --
+# openml.org/s/271 ("AutoML Benchmark All Classification", 71 tasks) and
+# openml.org/s/269 ("AutoML Benchmark Regression", 33 tasks) -- with task IDs
+# and dataset statistics read from OpenML's API on 2026-10-21, not typed from
+# memory. Each was picked to exercise one known risk:
+#
+# NOTE: `kc1` here is AMLB-suite task 359962, NOT validation.yaml's kc1
+# (task 3917) -- same dataset name, different OpenML task/splits.
+# results.csv has no benchmark column, so tell them apart by its `id`
+# column (or run them under different constraints, as `pilot` vs `test`).
+#
+# Run with the matching `pilot` constraint (2 folds, 10 min, 4 cores):
+#   caml sweep <frameworks...> --benchmark pilot --constraint pilot
+---
+
+# --- classification (from openml.org/s/271) ---
+
+- name: credit-g
+  openml_task_id: 168757
+  description: |
+    Binary, 1000 rows, 21 features of which 14 categorical. Small, classic,
+    mostly-categorical baseline.
+
+- name: car
+  openml_task_id: 359960
+  description: |
+    Multiclass (4), 1728 rows, 7 features, ALL categorical.
+
+- name: kc1
+  openml_task_id: 359962
+  description: |
+    Binary with "true"/"false" string labels -- the pandas bool-coercion
+    round-trip trap (already broke FEDOT on validation.yaml's kc1).
+
+- name: cnae-9
+  openml_task_id: 359957
+  description: |
+    Multiclass (9), 1080 rows, 857 sparse-ish numeric features. Wide-ish
+    multiclass with few rows per class.
+
+- name: christine
+  openml_task_id: 359973
+  description: |
+    Binary, 5418 rows, 1637 features. Wide: the shape that made GAMA's
+    search evaluate zero individuals on bioresponse (1776 cols) in 60s.
+
+- name: adult
+  openml_task_id: 359983
+  description: |
+    Binary, 48842 rows, 9 categorical, 6465 missing values. The largest
+    pilot task: a realistic medium-size RAM and time-budget check.
+
+# --- regression (from openml.org/s/269) ---
+
+- name: abalone
+  openml_task_id: 359944
+  description: |
+    Regression, 4177 rows, 9 features (1 categorical). Clean baseline.
+
+- name: house_prices_nominal
+  openml_task_id: 359951
+  description: |
+    Regression, 1460 rows, 80 features of which 43 categorical, 6965
+    missing values. Messy, mostly-categorical regression.
+
+- name: us_crime
+  openml_task_id: 359945
+  description: |
+    Regression, 1994 rows, 127 numeric features, 39202 missing values
+    (heavy missingness).

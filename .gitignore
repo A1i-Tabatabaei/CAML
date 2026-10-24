@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv
+uv.lock.tmp
+
+# Per-framework isolated venvs and install markers (created by `caml install`, never committed)
+frameworks/*/venv/
+frameworks/*/.setup/
+frameworks/*/lib/
+
+# Provenance stamp written into deployed archives by scripts/provision_vps.sh
+# and scripts/sync_vps.sh (a VPS checkout has no .git; see resources.git_info)
+/REVISION
+
+# Benchmark run outputs and downloaded/cached datasets
+results/
+output/
+input/
+*.log
+
+# Local secrets / VPS access notes (see docs/operations/vps-access.md — placeholder only, never real creds here)
+docs/operations/.vps-access.local.md
+# Local secrets / GPU VPS access notes (administrator login + password; see docs/operations/gpu.md — never real creds in git)
+docs/operations/.gpu-vps-access.local.md
+# Local secrets / TabPFN API key (see docs/operations/tabpfn-access.md — placeholder only, never real creds here)
+docs/operations/.tabpfn-access.local.md
+# Any other private local note (e.g. docs/research/.paper-plan-private.local.md)
+*.local.md
+# Claude Code per-user settings (project-shared ones under .claude/ are committed)
+.claude/settings.local.json
+.env
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

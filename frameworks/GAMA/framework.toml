@@ -1,0 +1,174 @@
+[framework]
+name = "GAMA"
+tier = 2
+project_url = "https://github.com/amore-labs/gama"
+license = "Apache-2.0"
+
+[python]
+# gama's own pyproject.toml declares requires-python = ">=3.9" with no
+# ceiling, but that's not the real constraint (confirmed live, 2026-07-30):
+# gama==23.0.0.post1 hard-pins `scikit-learn>=1.1.0,<1.3` in its own
+# [project.dependencies], and the newest matching release (scikit-learn
+# 1.2.2) has wheels for cp38-cp311 only -- no cp312, no cp313 at all (a
+# full version lower than FEDOT/LightAutoML's <3.13 ceiling; that
+# scikit-learn release line ended before Python 3.12 existed). Forces
+# resolution to exactly 3.11.
+range = ">=3.11,<3.12"
+
+[install]
+# HEALTH FLAG (see CLAUDE.md's "GAMA health" research finding, re-confirmed
+# live 2026-07-30, over two years after the framework's last release):
+# latest PyPI release is still 23.0.0.post1, uploaded 2024-06-14 -- no
+# newer release since. GitHub (amore-labs/gama, renamed from
+# openml-labs/gama) confirms: last push 2024-09-04, not archived. Per
+# CLAUDE.md's Phase-5 policy, this install attempt is time-boxed; if it
+# doesn't come up clean, downgrade to best-effort in STATUS.md with the
+# user's explicit sign-off, not a unilateral call.
+#
+# LICENSE DISCREPANCY (confirmed live, 2026-07-30): gama's own
+# pyproject.toml declares `license = {text = "MIT"}`, but the actual
+# LICENSE file at the repo root is Apache License 2.0 (confirmed both via
+# GitHub's own license detection and reading the file directly) -- an
+# inconsistency in the upstream project itself, not a research error here.
+# Treating the actual LICENSE file as authoritative (matches this
+# manifest's `license` field and CLAUDE.md's roster table).
+#
+# API verified live against github.com/amore-labs/gama (tag v23.0.0.post1,
+# gama/gama.py's base Gama class + GamaClassifier/GamaRegressor),
+# 2026-07-30: n_jobs/max_total_time/scoring/random_state/max_memory_mb/
+# output_directory are all still valid Gama.__init__ kwargs; .fit(X, y)/
+# .predict(X)/.predict_proba(X) signatures and the private `_final_pop`
+# attribute (used for models_count) are all unchanged. AMLB's own exec.py
+# has a `version_leq_20_2_0` branch for a GAMA API predating 20.2.0 --
+# irrelevant here (CAML's exact-pin-and-deliberately-bump policy will
+# never install anything that old), dropped rather than ported dead.
+#
+# category-encoders and scikit-learn are gama's own pinned dependencies
+# (confirmed in its pyproject.toml) -- not added explicitly here, unlike
+# AMLB's GAMA/requirements.txt which lists `packaging` for its now-dead
+# version_leq_20_2_0 branch (also dropped, so packaging is no longer
+# needed as an explicit dependency either).
+#
+# numpy<2 steering pin (confirmed live on the real VPS, 2026-07-30 -- same
+# class of fix as H2OAutoML's identical pin): gama's own numpy>=1.20.0
+# floor has no ceiling, so it silently accepts whatever numpy
+# frameworks/shared/requirements.txt already installed (numpy 2.x).
+# scikit-learn==1.2.2 (forced by gama's own scikit-learn<1.3 pin, see
+# [python] above) predates numpy 2.0 (released ~Jan 2023, numpy 2.0
+# shipped June 2024) and its Cython-compiled extensions (e.g.
+# sklearn/utils/murmurhash.pyx) were built against numpy's pre-2.0 C-API --
+# raises `ValueError: numpy.dtype size changed, may indicate binary
+# incompatibility` at import time on a numpy 2.x runtime. GAMA is the
+# third framework in the roster to need a numpy<2 pin (after
+# MLJARSupervised's numba>=0.60-driven case and H2OAutoML's), and the
+# first where the ABI break is the *direct* cause rather than a
+# supporting-library constraint.
+#
+# setuptools<82 steering pin (confirmed live on the real VPS, 2026-07-30 --
+# same class of fix as TPOT's and FEDOT's identical pins, see their
+# framework.toml gotchas): gama's own stopit>=1.1.1 sub-dependency does a
+# bare `import pkg_resources` in stopit/__init__.py -- the *same* stopit
+# package that caused TPOT's original instance of this bug. This is the
+# third framework in the roster needing this exact pin.
+packages = ["gama==23.0.0.post1", "numpy<2", "setuptools<82"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "gama"
+current_pin = "23.0.0.post1"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+Verified on the real VPS, 2026-07-30 -- came up clean despite the health
+flag (see below): two real install bugs found and fixed, zero exec.py
+bugs. Scores: kc2 AUC 0.890/0.887 (acc 0.811/0.792, balacc 0.646/0.500),
+iris acc 0.933/1.000, cholesterol RMSE 42.14/53.96 -- all in line with
+every other verified framework. This was the health-flagged, time-boxed
+framework in the roster; it did not need the escalation path (user
+sign-off before downgrading to best-effort) since it came up clean well
+within the timebox.
+
+**Fixed (1/2)**: `ValueError: numpy.dtype size changed, may indicate
+binary incompatibility. Expected 96 from C header, got 88 from PyObject`,
+raised importing gama itself (gama -> GamaClassifier -> sklearn.base ->
+sklearn.utils.murmurhash, a Cython extension). Root cause: gama's own
+scikit-learn<1.3 pin resolves to scikit-learn==1.2.2, which predates
+numpy 2.0 (released ~Jan 2023 vs. numpy 2.0's June 2024) -- its
+Cython-compiled extensions were built against numpy's pre-2.0 C-API, and
+gama's own unbounded numpy>=1.20.0 floor doesn't stop a numpy 2.x
+runtime from being installed. Fixed with a numpy<2 steering pin -- same
+class of fix as H2OAutoML's identical pin, third framework in the
+roster needing it, first where the ABI break is the direct cause rather
+than a supporting-library constraint.
+
+**Fixed (2/2)**: ModuleNotFoundError: No module named 'pkg_resources',
+surfacing one import deeper once the numpy fix cleared the first crash
+(gama -> gama.gama -> `import stopit`, and stopit/__init__.py does a bare
+`import pkg_resources`). This is the *same* stopit package that caused
+TPOT's original instance of this bug, and the same root cause as TPOT's
+and FEDOT's identical fixes: a bare uv venv doesn't bundle setuptools,
+and setuptools>=82.0.0 dropped pkg_resources entirely even when present.
+Fixed with the same setuptools<82 pin -- third framework in the roster
+needing it.
+
+exec.py is a near-verbatim port of AMLB's frameworks/GAMA/exec.py, minus
+the dead version_leq_20_2_0 branch (see above). AMLB's own reference
+already had the measure_inference_time wiring (unlike FEDOT's older
+reference), so no CAML-specific addition was needed there -- ported as-is,
+including its use of dataset.test.X.sample(...) (pandas-style) rather
+than TPOT/FEDOT's numpy-index-based synthetic-row construction. Not
+exercised by the test benchmark (measure_inference_time defaults off), so
+this specific line is trusted from the reference rather than independently
+verified against CAML's actual runtime dataset.test.X type -- revisit if
+Phase 6 turns that flag on and something looks off.
+
+output_directory=output_subdir("logs", config): Gama's own __init__ raises
+ValueError if this directory exists and is non-empty. Ported as-is from
+AMLB's reference, which relies on the same output_subdir() CAML already
+uses successfully for TPOT/FEDOT's artifact-saving paths (a fresh
+directory per job) -- confirmed no collisions across all 6 smoke-test jobs.
+
+models_count=50 on every single job (all 6, both folds, all 3 tasks) --
+GAMA's own default population size (`pop_size=20` internally, but
+`_final_pop` apparently reports something closer to total individuals
+evaluated across the full EA run within the 60s budget, not just the
+final generation's population). Consistent across every job, not a bug --
+just means models_count isn't as informative a signal for GAMA as it is
+for e.g. TPOT's evaluated_individuals count. Not investigated further,
+non-blocking.
+
+**Feature-usage reporting** (added 2026-09-06, verified on a real VPS run
+2026-09-10, extraction extended 2026-09-15): GAMA's default search space
+(`gama/configuration/classification.py`) always includes SelectFwe/
+SelectPercentile/VarianceThreshold as candidate pipeline steps, not opt-in.
+**Confirmed on a real fitted `gama_automl.model`** (kc2/iris/cholesterol,
+`test` benchmark): it genuinely is a flat `sklearn.Pipeline` as assumed,
+e.g. `[imputation(SimpleImputer), 1(PolynomialFeatures), 0(LinearSVC)]` for
+the iris fit -- notably simpler than TPOT's shape, no FeatureUnion wrapping
+observed. For these short 60s-budget fits, GAMA never actually chose a
+selector step either, so extraction correctly fell back to "all columns
+used" (accurate).
+
+**Extension (2026-09-15)**: the confirmed structural limitation -- GAMA's
+pipeline always starts with an imputation step (`SimpleImputer`) as step 0,
+so a real selector would land at step 1+ and never match a "selector must
+be literally first" rule -- is now handled. `used_columns_from_pipeline()`
+tolerates a leading `SimpleImputer` (confirmed not to change column
+identity/count/order) before the selector, so a selector at step 1 now
+extracts correctly; any OTHER kind of step before the selector (anything
+that isn't `SimpleImputer` or a literal `"passthrough"`) still falls back
+to "all columns used", since we can't in general track column identity
+through an arbitrary transformer. Covered by unit tests against a real
+fitted `sklearn.Pipeline` with an imputer-then-selector shape
+(`tests/test_feature_usage.py`); **not yet re-verified against a real GAMA
+fit that actually picks a selector** (these short test-benchmark fits still
+don't pick one) -- confirmed correct against the exact shape GAMA is known
+to produce, but a wider/longer real run choosing a real selector would be
+the strongest end-to-end check.
+"""

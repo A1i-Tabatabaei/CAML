@@ -1,0 +1,117 @@
+[framework]
+name = "SapientML"
+tier = 2
+project_url = "https://github.com/sapientml/sapientml"
+license = "Apache-2.0"
+
+[python]
+# PyPI classifier claims >=3.10,<3.14 -- verified empirically wrong on the
+# first VPS install attempt, 2026-07-31: uv resolved Python 3.13, and
+# `sapientml`'s own pin `tantivy<0.22,>=0.21` locks in tantivy 0.21.0,
+# which has manylinux wheels for cp38-cp312 only (confirmed via PyPI's
+# file listing) -- no cp313 wheel, and the cp313 source-build fallback
+# fails outright (tantivy 0.21.0's sdist pyproject.toml doesn't parse
+# under uv's stricter PEP 621 metadata checks: missing project.version /
+# project.dynamic). sapientml's own tantivy pin forbids the newer tantivy
+# releases (0.22.x+) that do ship cp313 wheels, so this isn't fixable via
+# a version bump -- same class of fix as LightAutoML's statsmodels pin and
+# FEDOT's scipy pin: cap below 3.13.
+range = ">=3.10,<3.13"
+
+[install]
+# No extra_index_urls needed -- confirmed via PyPI JSON API that sapientml
+# has no torch dependency at all (unlike LightAutoML/AutoGluon).
+#
+# nest_asyncio is a real, undeclared upstream dependency -- confirmed
+# empirically 2026-07-31: `import sapientml` chains into
+# sapientml/executor.py, which does a bare `import nest_asyncio`, but
+# neither sapientml==0.4.17 nor sapientml-core==0.8.0 lists it in
+# Requires-Dist (checked both via PyPI's JSON API). A genuine upstream
+# packaging gap, not a CAML bug -- added explicitly so `uv pip install`
+# resolves it instead of crashing on first import.
+#
+# scipy==1.14.1 steering pin -- sapientml-core's own pin (scipy<2.0.0,
+# >=1.14.0) is far too loose. Confirmed empirically 2026-07-31: the
+# default resolution (scipy 1.18.0) breaks sapientml_core's own
+# meta_features.py, which calls `scipy.stats.kstest(c0, "norm",
+# [mean, std])` -- a standard, valid kstest usage -- but scipy's own
+# internal array-API-standard dispatch machinery
+# (axis_nan_policy_wrapper -> _masked_apply) has changed how it invokes
+# the resolved CDF callable somewhere between 1.14 and 1.18, now calling
+# `scipy.special.ndtr()` with 3 positional args where it only accepts
+# 1-2 -- `TypeError: ndtr() takes from 1 to 2 positional arguments but 3
+# were given`. Reproduced in isolation outside SapientML entirely
+# (confirms this is a scipy-internal regression, not an exec.py bug).
+# scipy==1.14.1 (the floor of sapientml-core's own allowed range, most
+# likely what its authors actually tested against) confirmed working via
+# the same isolated repro. Exact-pinned rather than a `<` range since the
+# precise version where the regression was introduced wasn't identified
+# (search inconclusive between 1.15/1.16/1.17) -- 1.14.1 is the one
+# concretely verified version, not a guess.
+packages = ["sapientml==0.4.17", "nest_asyncio==1.6.0", "scipy==1.14.1"]
+
+[install.system_packages]
+# Confirmed empirically, 2026-07-31: zero apt packages needed. lancedb/
+# tantivy both resolved prebuilt manylinux cp312 wheels; mecab-python3
+# (the one real risk flagged before install -- some distros need a system
+# libmecab for the bindings to load) installed and imported cleanly with
+# no system package at all.
+apt = []
+
+[version_check]
+pypi_package = "sapientml"
+current_pin = "0.4.17"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-31"
+gotchas = """
+Verified on the real VPS, 2026-07-31: installed cleanly (Python 3.12,
+119 packages) after the three install-time fixes above, and the full
+6-job smoke test produced real, plausible scores in line with every
+other verified framework -- kc2 AUC 0.668/0.861, iris acc 0.933/1.000,
+cholesterol RMSE 46.57/54.42. Full research writeup, the
+CAML-metric-to-adaptation_metric translation table, and the complete
+build log (including two exec.py-level bugs found and fixed, not just
+the three install-level ones above) are in docs/frameworks/sapientml.md
+-- read that first if touching this framework again.
+
+**predict_option must be forced to "default"**, not left at SapientML's
+own default (None). With adaptation_metric set to a probability-needing
+metric (auc/logloss/ROC_AUC/Gini/MAP_K -- which covers most of CAML's own
+default metric lists), SapientML selects a pipeline whose predict()
+output is NOT a single column of hard labels: observed both a column of
+raw probability floats (kc2, metric=auc) and a KeyError because the
+target column name wasn't even present in the output (iris, metric=
+logloss). exec.py sets predict_option="default" via
+training_params.setdefault(...) (still overridable through
+framework_params) specifically to keep the output shape predictable.
+
+Corpus/meta-model files ship as package data inside sapientml-core's
+wheel (confirmed via GitHub: sapientml_core/models/{PY39,PY310,PY311}/
+*.pkl, a few hundred KB, committed directly to the repo) -- no
+post_install_script needed, unlike TabPFN's old local-package pre-warm
+step. Python 3.12/3.13 gracefully fall back to the PY311-trained models
+(confirmed by reading sapientml_core/seeding/predictor.py directly), so
+that specific mismatch between the package's Python classifier and its
+bundled model directories is NOT a functional blocker.
+
+**Known quality limitation, not a bug**: classification "probabilities"
+are a one-hot encoding of the hard prediction (SapientML's predict()
+doesn't expose real predict_proba through this API in a way this
+integration uses), so logloss/auc scores will look more extreme than a
+framework with genuinely calibrated probabilities (e.g. iris fold 0's
+logloss of 2.40 despite 93% accuracy) -- expected, matches the AMLB
+reference's own known behavior, not something this pass fixed.
+
+**Feature-usage reporting** (added 2026-09-06): SapientML's pipeline
+generator has no selection templates at all (confirmed by reading
+sapientml-core 0.8.0's source directly -- only encoding/scaling/imputation
+templates exist), so `n_features_total`/`n_features_used`/`features_used`
+in `results.csv` always report all columns. **Must snapshot `all_columns`
+before the `sanitize()`-based column rename** (see `rename_map` above) --
+otherwise the report would leak SapientML's internal sanitized identifiers
+instead of the dataset's real column names.
+"""

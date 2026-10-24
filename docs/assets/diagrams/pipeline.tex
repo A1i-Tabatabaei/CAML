@@ -1,0 +1,34 @@
+\documentclass[border=10pt]{standalone}
+\input{styles}
+\begin{document}
+\begin{tikzpicture}[node distance=3.5cm]
+
+  \node[indigo] (cli)
+    {\Hd{caml run}\\[1pt]\Sb{the CLI entry point}};
+  \node[amber, right=2.1cm of cli] (load)
+    {\Hd{Load dataset}\\[1pt]\Sb{OpenML task}\\\Sb{or local CSV}};
+  \node[green, right=of load] (fw)
+    {\Hd{fit() $\to$ predict()}\\[1pt]\Sb{the AutoML framework}};
+  \node[purple, right=of fw] (score)
+    {\Hd{Score}\\[1pt]\Sb{vs.\ ground truth}\\\Sb{AUC / logloss / RMSE}};
+  \node[card, right=2.2cm of score] (out)
+    {\Hd{results.csv}};
+
+  % isolation sandbox around the framework stage
+  \begin{scope}[on background layer]
+    \node[draw=green!70, dashed, line width=1pt, rounded corners=8pt,
+          fill=green!6, fit=(fw), inner sep=15pt] (box) {};
+  \end{scope}
+  \node[anchor=south, yshift=1pt] at (box.north)
+    {\Sbc{green}{\itshape isolated uv venv \textbullet\ own Python \& deps}};
+
+  % flow
+  \draw[arrow] (cli) -- (load);
+  \draw[arrow] (load) -- (fw)
+    node[alabel, midway, yshift=1pt] {X, y + config\\{\itshape JSON via stdin}};
+  \draw[arrow] (fw) -- (score)
+    node[alabel, midway, yshift=1pt] {predictions\\{\itshape JSON}};
+  \draw[arrow] (score) -- (out);
+
+\end{tikzpicture}
+\end{document}

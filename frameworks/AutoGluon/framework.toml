@@ -1,0 +1,91 @@
+[framework]
+name = "AutoGluon"
+tier = 1
+project_url = "https://github.com/autogluon/autogluon"
+license = "Apache-2.0"
+
+[python]
+range = ">=3.11,<3.13"    # resolves to 3.12 (AutoGluon 1.5.0 supports >=3.10,<3.14)
+
+[install]
+# Tabular-only bring-up: CAML v1 has no time-series benchmark, so we install
+# `autogluon.tabular[all]` rather than AMLB's full `autogluon` meta-package
+# (which also drags in autogluon.multimodal + autogluon.timeseries — a large
+# torch/transformers/timm stack CAML never imports). `[all]` gives the full
+# tabular model roster (LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees,
+# KNN, LinearModel, and the torch-backed NN/FastAI models) — that's what a
+# representative benchmark should measure.
+#
+# Deviations from AMLB's setup.sh (frameworks/AutoGluon/setup.sh in the ref
+# clone), both deliberate:
+#   - dropped the full `autogluon` meta-package (tabular-only, see above);
+#   - dropped the `skex` extra (scikit-learn-intelex, an x86-only Intel perf
+#     accelerator — not a correctness requirement, and it further-pins sklearn
+#     in ways worth avoiding on a fresh bring-up). Revisit if AutoGluon runtime
+#     ever needs to be optimized. See docs/frameworks/autogluon.md.
+#
+# GPU auto-detection (Phase 8): the installer picks gpu_extra_index_urls
+# (CUDA wheels) when a GPU is present on the box, extra_index_urls (CPU-only
+# wheels) otherwise -- so a CPU box never pulls the multi-GB CUDA build and a
+# GPU box gets torch-accelerated NN models with no manual step. cuXXX must
+# match the box's driver -- verified on the RTX A4000 box; see gpu.md.
+packages = ["autogluon.tabular[all]==1.5.0"]
+extra_index_urls = ["https://download.pytorch.org/whl/cpu"]
+gpu_extra_index_urls = ["https://download.pytorch.org/whl/cu124"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "autogluon.tabular"
+current_pin = "1.5.0"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-29"
+gotchas = """
+Tabular-only (no exec_ts.py / time-series — out of scope for CAML v1).
+`autogluon.tabular[all]` pulls torch for its NN models; matplotlib is
+force-set to the 'agg' backend in exec.py (headless).
+
+Phase 6, 2026-07-30: applied and verified the CPU-only torch wheel fix
+(`extra_index_urls`, see `[install]` above), closing out the research
+note that used to live here. History: originally deferred under a
+mistaken assumption that this "needs an installer index-strategy change,
+not just an extra-index-url"; that assumption was corrected earlier in
+Phase 6 by read-only-verifying LightAutoML's real installed torch build
+on the VPS (`torch.__version__ == '2.13.0+cpu'`, `torch.version.cuda is
+None`, ~722MB vs. CUDA builds' multi-GB) — LightAutoML's manifest shape
+is structurally identical to AutoGluon's for this purpose (a single
+top-level `packages` entry with torch as a *transitive* dependency, not
+pinned directly), so the same one-line fix applied cleanly here too.
+Re-verified via `caml uninstall AutoGluon && caml install AutoGluon` +
+the full smoke test on the real VPS -- see `docs/frameworks/autogluon.md`
+for the actual torch version/size and confirmation the NeuralNetFastAI
+upstream bug (below) and all 6 job scores are unaffected by the wheel
+swap.
+
+NeuralNetFastAI fails 100% of the time under this pin (fastai==2.8.7 +
+fastcore==2.1.10, both AutoGluon's own resolved deps): AttributeError:
+'list' object has no attribute 'starmap' in fastcore's L.starmap, called
+from fastai's fit_one_cycle. Confirmed upstream AutoGluon/fastai/fastcore
+bug, not ours -- AutoGluon's own exception handling catches it per-model
+and excludes it from the ensemble, so runs still complete with real scores
+from the other ~8 model types. See docs/frameworks/autogluon.md for full
+detail. Not fixed here (would mean overriding AutoGluon's own declared
+fastai/fastcore pins) -- flag to the user before attempting a workaround.
+
+**Feature-usage reporting** (added 2026-09-06): under the current config
+(`feature_prune_kwargs` left at its default `None`, unchanged), AutoGluon
+never prunes, so `n_features_total`/`n_features_used`/`features_used` in
+`results.csv` report `predictor.features(feature_stage="original")` -- i.e.
+all columns. AutoGluon does have a real `feature_prune_kwargs`/
+`force_prune=True` option, but it's experimental (disabled by default
+upstream too) and only updates feature lists for base models whose score
+improved, not globally -- since the final predictor is a multi-model stack,
+enabling it would need a per-base-model breakdown to report correctly, not
+attempted here. Turning it on is a deliberate, separate decision (real
+search-time cost), not done as part of this reporting feature.
+"""

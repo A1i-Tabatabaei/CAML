@@ -1,0 +1,127 @@
+[framework]
+name = "LightAutoML"
+tier = 2
+project_url = "https://github.com/sb-ai-lab/LightAutoML"
+license = "Apache-2.0"
+
+[python]
+# lightautoml's own classifiers claim 3.8-3.13, but its `statsmodels<=0.14.0`
+# dependency pin has no prebuilt wheel for 3.13 (confirmed live via PyPI's
+# file listing for statsmodels 0.14.0, 2026-07-30 -- wheels exist for
+# cp38-cp312 only), so resolving to 3.13 falls back to a source build that
+# fails outright (Cython compile error in statsmodels/nonparametric/linbin.pyx,
+# hit on the real VPS). Capping at <3.13 forces the newest version that
+# still has a real wheel for every dependency.
+range = ">=3.11,<3.13"
+
+[install]
+# Pin/API verified live against PyPI + github.com/sb-ai-lab/LightAutoML
+# (lightautoml/automl/presets/tabular_presets.py, lightautoml/tasks/base.py,
+# lightautoml/reader/base.py), 2026-07-30 -- unlike TPOT/NaiveAutoML, no
+# breaking API drift found: TabularUtilizedAutoML's constructor
+# (task/timeout/memory_limit/cpu_limit/random_state), Task's valid name
+# strings ("binary"/"reg"/"multiclass"), and the reader's `class_mapping`
+# attribute AMLB's exec.py reaches into all still match AMLB's reference
+# exactly.
+#
+# pulls torch>=1.9.0; extra_index_urls forces the CPU-only wheel on this
+# CPU-only VPS instead of the multi-GB default CUDA build (same treatment
+# as AutoGluon's torch note in CLAUDE.md).
+#
+# Deliberately deviates from AMLB's setup.sh, which apt-get installs
+# python3-opencv unconditionally: lightautoml's own install_requires
+# doesn't need it at all (opencv-python is part of an optional "CV
+# extras" group -- lightautoml[cv] -- not pulled by a bare `pip install
+# lightautoml`), and CAML's exec.py only touches the tabular preset
+# classes, never CV/image features. Verify empirically; add the apt
+# package back with a documented reason if a real ImportError shows up.
+packages = ["lightautoml==0.4.2"]
+extra_index_urls = ["https://download.pytorch.org/whl/cpu"]
+# GPU auto-detection (Phase 8): CUDA wheels when a GPU is present, CPU wheels
+# otherwise (installer.py::_select_index_urls). cuXXX must match the box's
+# driver -- verified on the RTX A4000 box; see docs/operations/gpu.md.
+gpu_extra_index_urls = ["https://download.pytorch.org/whl/cu124"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "lightautoml"
+current_pin = "0.4.2"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-30"
+gotchas = """
+Verified on the real VPS, 2026-07-30: after capping [python].range at
+<3.13 (see above -- statsmodels<=0.14.0 has no cp313 wheel, first install
+attempt hit a Cython source-build failure), install and the full 6-job
+smoke test both went cleanly, zero exec.py bugs. Scores: kc2 AUC
+0.870/0.884, iris acc 1.000/1.000, cholesterol RMSE 42.50/54.54 -- see
+docs/frameworks/lightautoml.md for full detail, including a non-blocking
+observation about kc2's acc/balacc looking low relative to its AUC.
+
+
+Data flow differs from every other array-based framework in the roster:
+`__init__.py` passes the *full* training dataframe (predictors + target,
+via `dataset.train.data`) rather than split X/y, because
+`TabularUtilizedAutoML.fit_predict()` takes `roles={"target": <name>}` and
+wants the target column embedded in `train_data` -- LightAutoML's own
+convention, not something CAML normalizes away. Test data is still
+split X/y as usual, since prediction only needs predictors.
+
+`predict()` returns a `NumpyDataset` object, not a plain array --
+`automl.predict(X_test).data` is required to get the raw numpy
+probabilities/predictions (ported as-is from AMLB, confirmed current).
+
+Class-label recovery reaches fairly deep into LightAutoML's internal
+object graph: `automl.outer_pipes[0].ml_algos[0].models[0][0].reader.class_mapping`
+(predict() returns array-index-encoded classes, not original labels --
+same underlying problem class as TPOT's `tpot.classes_` issue, different
+mechanism). Confirmed the `reader.class_mapping` attribute itself still
+exists in the current source; the rest of the attribute chain
+(outer_pipes/ml_algos/models) is ported as-is from AMLB and verified
+empirically by actually running rather than exhaustively tracing the
+class hierarchy by hand.
+
+`gpu_ids` is a real constructor kwarg (confirmed live). Phase 8 wired it up:
+exec.py passes `gpu_ids` when frameworks/shared/compute.py detects a GPU
+(overridable via CAML_GPU_IDS / CAML_COMPUTE). Caveat verified on the RTX
+A4000 box -- see docs/operations/gpu.md for LightAutoML's actual GPU behavior
+and whether its heavier GPU pipelines (which can want cupy/RAPIDS beyond the
+base pip install) engage or fall back to CPU on this box.
+
+**Feature-usage reporting** (added 2026-09-06; verified + one real bug found
+and fixed on a real VPS run, 2026-09-10): LightAutoML's
+`ImportanceCutoffSelector` is default-on (`selection_params.mode: 1` in
+`tabular_config.yml`) but only applies to the GBM branch
+(`select_algos: ['gbm']`) of the inner `TabularAutoML`; `TabularUtilizedAutoML`
+(what this exec.py actually uses) blends several such inner runs, so there's
+no single global "features used". `n_features_total`/`n_features_used`/
+`features_used` in `results.csv` report the UNION of `used_features` across
+every reachable branch (`automl.outer_pipes[*].ml_algos[*].models[*][*]` --
+the same object graph already reached into above for `.reader.class_mapping`),
+falling back to "all columns used" for the whole run if any branch doesn't
+expose it. **Confirmed live (lightautoml 0.4.2) that each leaf in that
+object graph is a `TabularAutoML` instance (wrapped via
+`MLAlgoForAutoMLWrapper`), not a raw model** -- the original assumption
+(`leaf.used_features` as a plain attribute) was WRONG and silently fell back
+to "all columns used" on every run. Fixed: each leaf exposes a real public
+method, `collect_used_feats() -> List[str]` (already unions that inner
+AutoML's own levels/pipes), confirmed by reading its source and calling it
+against a real fit. `union_of_branch_features()` now supports a callable
+`attr` (calls it if `getattr` resolves to something callable) and this
+exec.py passes `attr="collect_used_feats"`. Re-verified end-to-end on the
+VPS post-fix: real run completes cleanly, no introspection-failure warning.
+For kc2 (21 cols)/iris (4 cols)/cholesterol (13 cols) under the `test`
+benchmark's short budget, LightAutoML genuinely used all columns every
+time -- plausible at this scale/budget, not evidence the fix doesn't work;
+a wider dataset or longer budget would be a better test of whether it ever
+reports a genuine subset. This is a real approximation across blended
+branches, not the exact feature set of any one model -- if
+`TabularUtilizedAutoML` ever produces more outer_pipes/ml_algos than the
+single branch seen in this session's small test fits, that's still an
+open question for a future wider/longer real run.
+"""

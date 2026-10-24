@@ -1,0 +1,35 @@
+[framework]
+name = "FLAML"
+tier = 1
+project_url = "https://github.com/microsoft/FLAML"
+license = "MIT"
+
+[python]
+range = ">=3.11,<3.13"
+
+[install]
+packages = ["flaml[automl]==2.6.0"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "flaml"
+current_pin = "2.6.0"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-17"
+gotchas = """
+FLAML 1.2.4 historically needed xgboost<2 (AMLB's old setup.sh worked
+around this). Not carried forward here since we're pinned to 2.6.0 --
+re-check if current_pin is ever moved back below 2.x.
+
+**Feature-usage reporting** (added 2026-09-06): FLAML has no
+feature-selection capability, so `n_features_total`/`n_features_used`/
+`features_used` in `results.csv` always report every original column
+(`frameworks/shared/feature_usage.py`, `used_columns=None`). Purely
+additive reporting -- doesn't change FLAML's own behavior.
+"""

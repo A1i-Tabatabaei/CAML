@@ -1,0 +1,54 @@
+# Runtime/hardware budget presets, selected on the CLI via
+# `caml run <framework> <benchmark> <constraint>`.
+#
+# Trimmed from AMLB's resources/constraints.yaml: the `_gp3` variants are
+# dropped (they only differed by `ec2_volume_type`, an AWS-only field CAML
+# doesn't have — see CLAUDE.md decision #2, no AWS runner in v1).
+---
+
+test:
+  folds: 2
+  max_runtime_seconds: 600
+  cores: 4
+
+# Paper-track pilot (see resources/benchmarks/pilot.yaml and
+# docs/research/paper-plan.md): same shape as `test`, but a distinct name so
+# pilot rows in results.csv (which has no benchmark column) can never be
+# confused with old `test`-constraint smoke-test rows.
+pilot:
+  folds: 2
+  max_runtime_seconds: 600
+  cores: 4
+
+# A first screening pass on your own data (2026-10-24): 5 minutes per job,
+# every core on the box. A task's own `folds:` wins over this one, so a YAML
+# written by `caml prepare-data --folds 5` still runs 5 folds. Rankings
+# from a 5-minute budget can differ from 1-hour ones; confirm the top
+# frameworks with 1h8c before relying on them.
+quick:
+  folds: 3
+  max_runtime_seconds: 300
+  cores: -1
+
+1h4c:
+  folds: 10
+  max_runtime_seconds: 3600
+  cores: 4
+
+1h8c:
+  folds: 10
+  max_runtime_seconds: 3600
+  cores: 8
+  min_vol_size_mb: 16384
+
+4h8c:
+  folds: 10
+  max_runtime_seconds: 14400
+  cores: 8
+  min_vol_size_mb: 65536
+
+8h8c:
+  folds: 10
+  max_runtime_seconds: 28800
+  cores: 8
+  min_vol_size_mb: 131072

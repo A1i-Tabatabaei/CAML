@@ -1,0 +1,66 @@
+[project]
+name = "caml"
+version = "1.0.0"
+description = "Benchmark the major open-source AutoML frameworks on any tabular dataset, each in its own isolated uv environment."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES/*"]
+authors = [{ name = "Ali Tabatabaei" }]
+keywords = ["automl", "benchmark", "machine-learning", "tabular", "autogluon", "h2o", "flaml", "tabpfn", "openml"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "click>=8.1",
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=16.0",
+    "scikit-learn>=1.4",
+    "scipy>=1.10",
+    "ruamel.yaml>=0.18",
+    "openml>=0.14",
+    "psutil>=5.9",
+    "requests>=2.31",
+    "packaging>=24.0",
+    "filelock>=3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/A1i-Tabatabaei/CAML"
+Documentation = "https://github.com/A1i-Tabatabaei/CAML/tree/main/docs"
+Repository = "https://github.com/A1i-Tabatabaei/CAML"
+Issues = "https://github.com/A1i-Tabatabaei/CAML/issues"
+Changelog = "https://github.com/A1i-Tabatabaei/CAML/blob/main/CHANGELOG.md"
+
+[project.scripts]
+caml = "caml.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/caml"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

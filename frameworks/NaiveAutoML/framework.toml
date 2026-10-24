@@ -1,0 +1,116 @@
+[framework]
+name = "NaiveAutoML"
+tier = 2
+project_url = "https://github.com/fmohr/naiveautoml"
+license = "MIT"
+
+[python]
+# PyPI classifiers list ONLY "Programming Language :: Python :: 3.12" as of
+# 2026-07-30 (confirmed live) -- no range, no requires_python ceiling
+# declared at all, just that one exact version. Pinning narrowly rather
+# than trusting uv to resolve to 3.13 (the newest _CANDIDATE_PYTHONS entry,
+# not declared supported) or drifting onto 3.11.
+range = ">=3.12,<3.13"
+
+[install]
+# naiveautoml exact-pins numpy<2, scikit-learn==1.5.2, configspace==1.2.0,
+# scikit-multilearn==0.2.0 directly in its own install_requires (confirmed
+# live via PyPI metadata, 2026-07-30 -- unchanged since the original
+# 2026-07-17 research pass). This is CAML's strongest real-world case for
+# per-framework venv isolation: these pins directly conflict with
+# AutoGluon's numpy-2-era dependency stack, so the two frameworks genuinely
+# cannot share one Python environment. No extra steering pins added here --
+# `naiveautoml==0.1.6` alone pulls all of the above transitively.
+#
+# scikit-multilearn==0.2.0 (a naiveautoml sub-dependency, not something we
+# pin directly) hasn't had a PyPI release since December 2018 -- a real
+# supply-chain staleness flag, same class of concern already noted for
+# GAMA. Not something we can route around (naiveautoml pins it exactly);
+# just something to watch for if install or runtime ever breaks here.
+packages = ["naiveautoml==0.1.6"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "naiveautoml"
+current_pin = "0.1.6"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+# last_verified intentionally unset: install is clean but the smoke test
+# is BLOCKED on a confirmed-upstream bug (see below) -- set this only once
+# a run actually produces real scores (see STATUS.md's "Blocked" section).
+last_verified = ""
+gotchas = """
+**BLOCKED as of 2026-07-30: confirmed-upstream `KeyError: nan` in
+naiveautoml's own `fit()`, fails every task in the test benchmark (kc2,
+iris, cholesterol -- not dataset-specific).** Root cause, traced via a
+scoped single-task diagnostic script:
+`naiveautoml.py::fit()`'s `as_result_for_best_candidate` is built from the
+single globally-highest-scoring row across the framework's *entire*
+per-phase evaluation history (`{col: sorted_results[col].iloc[-1] for col
+in sorted_results.columns}`), not from a row that actually corresponds to
+the final decided combination of pipeline steps. Each history row only
+has non-NaN `{step}_class` values for the step being evaluated in that
+specific phase; if the single overall-best-scoring row happens to come
+from an early, single-step phase (e.g. "learner" evaluated alone, before
+"feature-pre-processor" was ever tried), other steps' `_class` columns are
+NaN in that row. The crash: `get_config_space_for_selected_algorithms`
+(algorithm_selection/_sklearn_hpo.py) then does
+`self.config_spaces[step][selection]` where `selection` is that NaN,
+raising `KeyError: nan`. Independently corroborated as a known class of
+problem (not specific to CAML's port): github.com/fmohr/naiveautoml issue
+#75 reports another user hitting crashes running NaiveAutoML under AMLB
+with short time constraints -- their first reported crash is the exact
+`max_hpo_iterations` float bug below; this `KeyError: nan` issue is a
+separate, deeper bug in the same general problem area, not itself filed
+as an issue as of 2026-07-30. This is inside naiveautoml's own package
+code -- fixing it would mean forking/monkeypatching a third-party
+dependency, out of proportion for a Tier-2 "good diversity pick, low
+risk" framework. See STATUS.md's "Blocked" section -- needs the user's
+read on how to proceed (skip, time-box further, or file upstream and
+wait), not a unilateral call.
+
+**Fixed**: AMLB's exec.py passes `max_hpo_iterations=1e10` -- a Python
+float. Current naiveautoml does `range(self.task.max_hpo_iterations)`
+internally (confirmed live, 2026-07-30), which raises `TypeError: 'float'
+object cannot be interpreted as an integer` on every job. CAML's exec.py
+uses `10_000_000_000` (an int) instead. Independently corroborated by the
+same GitHub issue #75 referenced above -- someone else hit this exact
+error running NaiveAutoML under AMLB.
+
+**API drift from AMLB's reference, confirmed live against
+github.com/fmohr/naiveautoml (python/naiveautoml/naiveautoml.py),
+2026-07-30**: AMLB's exec.py passes `timeout=` and `execution_timeout=` to
+the `NaiveAutoML` constructor -- neither exists in the current source.
+The real kwargs are `timeout_overall` (total budget) and
+`timeout_candidate` (per-candidate-pipeline timeout, default 300s) --
+CAML's exec.py uses these instead, keeping AMLB's derivation logic
+(per-candidate timeout scaled from the overall budget, `max(budget // 20,
+10)`) just under the corrected parameter name. Would have been a
+100%-reproducible TypeError on every job had this been ported verbatim --
+found by reading the actual current source rather than trusting the
+AMLB reference, same discipline that caught TPOT's API break.
+
+A new constructor parameter not present when AMLB's integration was
+written: `max_hpo_iterations_without_imp` (default 100 -- stops the search
+early after 100 consecutive non-improving iterations, independent of the
+`max_hpo_iterations=1e10` override used here to make time the binding
+constraint). Left at its default rather than guessing at overriding it to
+match AMLB's original all-time-no-early-stop intent; revisit if a real
+benchmark run's behavior looks off.
+
+`naive_automl.history` / `.chosen_model` are both public properties
+(confirmed current) -- `save_artifacts` uses `.history` for the opt-out
+(`_save_artifacts`, default `["history"]`, matching AMLB) CSV dump.
+
+Data flow: `__init__.py` passes `y_enc` (label-encoded) rather than raw
+`y` for both splits, matching AMLB's original choice, with
+`target_is_encoded=True` set on the classification result so CAML's
+orchestrator scores against `dataset.test.y_enc` instead of raw `.y` --
+ported as-is rather than re-derived, since it's proven AMLB behavior and
+no reason surfaced to deviate.
+"""

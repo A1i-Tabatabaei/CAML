@@ -1,0 +1,18 @@
+\documentclass[border=10pt]{standalone}
+\input{styles}
+\begin{document}
+\begin{tikzpicture}[node distance=2.15cm]
+
+  \node[indigo] (n1) {\Hd{provision\_vps.sh}\\\Sb{root@host}\\\Sb{one command}};
+  \node[amber, right=of n1] (n2) {\Hd{git archive HEAD}\\\Sb{push over SSH}\\\Sb{no creds on box}};
+  \node[slate, right=of n2] (n3) {\Hd{bootstrap\_vps.sh}\\\Sb{apt baseline \textbullet\ uv}\\\Sb{caml user \textbullet\ swap}};
+  \node[green, right=of n3] (n4) {\Hd{setup\_workspace.sh}\\\Sb{workspace layout}\\\Sb{uv sync}};
+  \node[purple, right=of n4] (n5) {\Hd{caml doctor}\\\Sb{green}\\\Sb{ready to install}};
+
+  \draw[arrow] (n1) -- (n2);
+  \draw[arrow] (n2) -- (n3) node[alabel, midway, yshift=1pt]{as \textbf{root}};
+  \draw[arrow] (n3) -- (n4) node[alabel, midway, yshift=1pt]{as \textbf{caml}};
+  \draw[arrow] (n4) -- (n5);
+
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,16 @@
+# Baseline deps installed into every framework's isolated venv, before the
+# framework's own packages (see src/caml/frameworks/installer.py). This is
+# the callee side of the caller.py/callee.py IPC boundary: it needs pandas
+# (frameworks/shared/utils.py::load_timeseries_dataset), numpy/pyarrow for
+# (de)serializing the dataset/results across the subprocess boundary, and
+# psutil for the callee-side memory-monitoring helpers in caml.utils.
+#
+# Deliberately flexible ranges, not AMLB's hard `numpy==1.24.2` pin (no
+# Python 3.12 wheel, needs the now-removed `distutils` to build from
+# source — see CLAUDE.md's "research findings" section). Each framework's
+# own `[install].packages` in framework.toml may still further-pin numpy
+# etc. if that specific framework needs it (e.g. NaiveAutoML).
+numpy>=1.26
+pandas>=2.2
+pyarrow>=16.0
+psutil>=5.9

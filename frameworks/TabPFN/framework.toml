@@ -1,0 +1,107 @@
+[framework]
+name = "TabPFN"
+tier = 1
+project_url = "https://github.com/PriorLabs/TabPFN"
+# Package/code license is Apache-2.0-based (Prior Labs License = Apache-2.0
+# plus an attribution requirement). NOTE the MODEL WEIGHTS ship under a
+# separate *non-commercial* license -- see gotchas + docs/frameworks/tabpfn.md.
+license = "Apache-2.0"
+# Runs the TabPFN foundation model 100% on-box via the OSS `tabpfn` package:
+# after a one-time authenticated weight download, fit()/predict() never touch
+# the network and data never leaves the machine. The sibling `TabPFNClient`
+# framework runs the *same* model via Prior Labs' hosted API for boxes with no
+# local compute (there, data does leave the box). Prefer this one by default.
+
+[python]
+# tabpfn's README claims 3.10-3.14, and `pip install tabpfn` pulls a compatible
+# torch build automatically. Capped at <3.13 to resolve to 3.12 (the box's
+# system Python) -- the same empirically-proven ceiling every other torch
+# framework in this roster uses (AutoGluon, LightAutoML), avoiding any
+# newer-Python wheel-availability surprise on first bring-up. Widen later if a
+# 3.13/3.14 torch+tabpfn combo is verified to have real wheels.
+range = ">=3.10,<3.13"
+
+[install]
+# `tabpfn` pulls torch as a real dependency (unlike the hosted `tabpfn-client`,
+# which has none). GPU auto-detection (Phase 8): the installer picks
+# gpu_extra_index_urls (CUDA wheels) when a GPU is present on the box, and
+# extra_index_urls (CPU-only wheels) otherwise -- so a CPU box never pulls the
+# multi-GB CUDA build, and a GPU box gets real acceleration with no manual
+# step. TabPFN (local) is the prime GPU beneficiary in this roster: CUDA also
+# lifts TabPFN-3's default >1000-sample CPU refusal (see gotchas + gpu.md).
+# The cuXXX suffix must match the box's driver/CUDA version -- verified on the
+# RTX A4000 box; bump it (cu121/cu126/...) if a different driver needs it.
+packages = ["tabpfn==8.1.0"]
+extra_index_urls = ["https://download.pytorch.org/whl/cpu"]
+gpu_extra_index_urls = ["https://download.pytorch.org/whl/cu124"]
+
+[install.system_packages]
+apt = []
+
+[version_check]
+pypi_package = "tabpfn"
+current_pin = "8.1.0"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = ""   # filled after the VPS smoke test
+gotchas = """
+**Data stays on the box -- this is the whole reason this framework exists.**
+Unlike the sibling `TabPFNClient` (hosted API, data egress on every call),
+the local `tabpfn` package downloads the model weights once and then runs all
+inference locally -- fit()/predict() make no network calls and no training or
+test data ever leaves the machine.
+
+**Requires TABPFN_TOKEN for the one-time weight download** (not for every
+call, unlike the client). On first use `tabpfn` fetches the TabPFN-3
+checkpoint from HuggingFace, gated behind Prior Labs license acceptance.
+On a headless VPS the browser login can't run, so the documented escape hatch
+is: accept the license once at https://ux.priorlabs.ai, then set TABPFN_TOKEN
+in the environment (the SAME token the TabPFNClient framework uses -- one Prior
+Labs auth system). exec.py fails fast with a clear FrameworkError if the token
+is unset or still the placeholder. Weights cache to ~/.cache/tabpfn/ (override
+with TABPFN_MODEL_CACHE_DIR); both vars are added to run_in_venv's
+retained_env_vars in __init__.py so they cross the subprocess boundary.
+Once cached, subsequent runs need no network at all.
+
+**MODEL WEIGHTS ARE NON-COMMERCIAL.** The `tabpfn` code is Apache-2.0-based,
+but the TabPFN-3 weight checkpoint ships under a *non-commercial* license.
+Fine for benchmarking against public OpenML datasets, but a real flag for
+commercial use -- CAML (Apache-2.0) never redistributes the weights, yet
+anyone using local TabPFN results commercially must check Prior Labs'
+license first (KI-41). (Distinct
+from TabPFNClient, where you use Prior Labs' hosted service under their ToS
+rather than running the weight artifact yourself.)
+
+**GPU by default (Phase 8); CPU fallback is automatic.** exec.py resolves
+`device` via frameworks/shared/compute.py: CUDA when a usable GPU is present,
+CPU otherwise -- overridable per box with CAML_COMPUTE=cpu|gpu|auto and per run
+via framework_params["device"]. This matters more here than for any other
+framework: on CPU, TabPFN-3 refuses datasets larger than 1000 samples by
+default (a hardware guard, not a robustness limit -- see the `validation`
+findings in docs/frameworks/tabpfn.md), and a GPU lifts that ceiling outright
+in addition to the raw speedup.
+
+**In-context inference, not a hyperparameter search** -- one forward pass over
+the training set, so config.max_runtime_seconds is unused by default (same as
+the client). tabpfn does expose extra fit-time compute knobs
+(n_estimators / ensemble config) that flow through the standard
+framework_params passthrough if a future benchmark wants them.
+
+**Constructor differs from tabpfn-client:** the local estimators DO take a
+`device` kwarg (client's don't -- server-side). `random_state` is supported on
+both. Offline/air-gapped use is also possible: pre-cache with the repo's
+`scripts/download_all_models.py`, or pass `model_path=` to load a local .ckpt.
+
+**Feature-usage reporting** (added 2026-09-06): TabPFN has no
+feature-selection capability, so `n_features_total`/`n_features_used`/
+`features_used` in `results.csv` always report every original column
+(`used_columns=None`). Purely additive reporting -- doesn't change TabPFN's
+own behavior. TabPFN-3 does have an internal >500-feature round-robin
+ensemble-splitting behavior for very wide inputs -- irrelevant to this
+report (it still sees/uses every given column, just windows internally
+across ensemble members), and none of CAML's current benchmark tasks cross
+that threshold anyway.
+"""

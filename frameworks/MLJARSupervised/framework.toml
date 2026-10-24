@@ -1,0 +1,49 @@
+[framework]
+name = "MLJARSupervised"
+tier = 1
+project_url = "https://github.com/mljar/mljar-supervised"
+license = "MIT"
+
+[python]
+range = ">=3.11,<3.13"
+
+[install]
+# `numba>=0.60` is an explicit steering constraint, not a real mljar-supervised
+# dependency: mljar-supervised -> shap==0.52.0 -> numba/llvmlite are both
+# *unconstrained* on Linux, and without another pin in the mix uv's resolver
+# backtracks all the way to llvmlite==0.36.0, whose sdist hard-fails to build
+# on Python >=3.10 ("Cannot install on Python version 3.12.12; only versions
+# >=3.6,<3.10 are supported"). Forcing a modern numba floor drags llvmlite
+# along with it. See docs/frameworks/mljarsupervised.md.
+packages = ["mljar-supervised==1.3.1", "numba>=0.60"]
+
+[install.system_packages]
+apt = ["build-essential", "swig"]
+
+[version_check]
+pypi_package = "mljar-supervised"
+current_pin = "1.3.1"
+
+[exec]
+entrypoint = "exec.py"
+
+[notes]
+last_verified = "2026-07-17"
+gotchas = """
+Needs build-essential + swig at the system level (AMLB's setup.sh installed
+these too). matplotlib is force-set to the 'agg' backend in exec.py since
+there's no display on a headless VPS.
+
+**Feature-usage reporting** (added 2026-09-06): MLJAR has a real "Universal
+Feature Selection" (permutation-tests each feature against an injected
+random column, drops any that lose), but it only activates when `mode`
+resolves to `"Perform"`/`"Compete"` -- this exec.py never sets `mode`
+(defaults to `"Explain"`, selection OFF), so `n_features_total`/
+`n_features_used`/`features_used` in `results.csv` report all columns used
+today. Enabling `mode` to actually exercise selection is a deliberate,
+separate decision (real compute-time/behavior change, not done here) -- if
+it ever happens, note there's no clean public getter for the surviving
+column list; retrieval would mean diffing `X_train.columns` against a
+`drop_features.json` MLJAR writes to `results_path` on disk, an unsolved
+integration gap.
+"""

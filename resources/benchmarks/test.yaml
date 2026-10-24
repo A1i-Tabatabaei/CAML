@@ -1,0 +1,41 @@
+# A small, hand-picked set of tiny OpenML tasks used for install smoke
+# tests (`caml run <framework> --benchmark test --constraint test`).
+# Adapted from AMLB's resources/benchmarks/test.yaml; the AWS-only
+# `ec2_instance_type` field on `__dummy-task` is dropped (see CLAUDE.md
+# decision #2 — no AWS runner in CAML).
+---
+
+- name: __dummy-task
+  enabled: false
+  openml_task_id: 0
+  metric:
+    - acc
+    - auc
+    - logloss
+    - f1
+    - mae
+    - mse
+    - rmse
+    - rmsle
+    - r2
+  folds: 1
+  max_runtime_seconds: 600
+  cores: 1
+  max_mem_size_mb: -1
+
+- name: __defaults__
+  folds: 2
+  cores: 2
+  max_runtime_seconds: 60
+
+- name: kc2
+  openml_task_id: 3913
+  description: "binary classification test dataset"
+
+- name: iris
+  openml_task_id: 59
+  description: "multiclass classification test dataset"
+
+- name: cholesterol
+  openml_task_id: 2295
+  description: "regression test dataset with both numerical and categorical features with missing values"
