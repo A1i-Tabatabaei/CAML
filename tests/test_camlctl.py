@@ -455,6 +455,14 @@ def test_secrets_import_reads_a_hand_edited_file_and_never_prints_values(ctl: Ct
     r = ctl("secrets", "--check")
     assert secret_states(r.stdout) == {"TABPFN_TOKEN": "set", "HF_TOKEN": "set"}
     assert "tok-123" not in r.stdout
+    # camlctl loads the keys itself: a login shell that reads ~/.bash_profile
+    # instead of ~/.profile (CI's server-e2e) must not hide them.
+    (ctl.home / ".profile").write_text("# no hook here\n")
+    (ctl.home / ".bash_profile").write_text("# shadows .profile in login shells\n")
+    assert secret_states(ctl("secrets", "--check").stdout)["TABPFN_TOKEN"] == "set"
+    (ctl.uploads / "env.sh").write_text('printf "%s" "${TABPFN_TOKEN:-none}" > "$1"\n')
+    ctl("script", "env.sh", str(ctl.fake / "seen"))
+    assert (ctl.fake / "seen").read_text() == "tok-123"     # what jobs and frameworks inherit
     assert ctl("tabpfn-token", "--check").stdout.strip() == "token-set"
 
 

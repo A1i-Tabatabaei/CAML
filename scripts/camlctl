@@ -50,7 +50,9 @@ refresh_paths() {
 }
 
 # Run "$@" in directory $1 as the caml user, with its login environment
-# (uv on PATH, TABPFN_TOKEN from ~/.profile). CAMLCTL_JOB rides along so
+# (uv on PATH) and its API keys (~/.caml-secrets, loaded here explicitly:
+# a login shell reads ~/.bash_profile instead of ~/.profile whenever one
+# exists, which hid the keys on CI's server-e2e). CAMLCTL_JOB rides along so
 # `camlctl stop` can find every process a job started. XDG_* variables are
 # dropped: a system-wide XDG_CONFIG_HOME or XDG_CACHE_HOME (GitHub's runners
 # set one) reaches the caml user through sudo and points it at directories
@@ -60,10 +62,11 @@ XDG_UNSET=(-u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HO
 as_caml() {
   local dir="$1"; shift
   if [[ "$(id -un)" == "$CAML_USER" ]]; then
-    (cd "$dir" && env "${XDG_UNSET[@]}" CAMLCTL_JOB="${CAMLCTL_JOB:-}" "$@")
+    (cd "$dir" && env "${XDG_UNSET[@]}" CAMLCTL_JOB="${CAMLCTL_JOB:-}" \
+      bash -c 'if [ -f "$1" ]; then . "$1"; fi; shift; exec "$@"' camlctl "$CAML_HOME/.caml-secrets" "$@")
   else
     (cd / && sudo -u "$CAML_USER" -H -- env "${XDG_UNSET[@]}" CAMLCTL_JOB="${CAMLCTL_JOB:-}" \
-      bash -lc 'cd "$1" && shift && exec "$@"' camlctl "$dir" "$@")
+      bash -lc 'if [ -f ~/.caml-secrets ]; then . ~/.caml-secrets; fi; cd "$1" && shift && exec "$@"' camlctl "$dir" "$@")
   fi
 }
 
@@ -790,8 +793,8 @@ cmd_bundle() {
 
 # --- secrets -----------------------------------------------------------------
 # API keys for the caml user live in ~caml/.caml-secrets (mode 600) as
-# `export NAME=value` lines, which ~caml/.profile sources, so every command
-# camlctl runs as caml (a login shell) sees them. The user types them in
+# `export NAME=value` lines. as_caml loads them for every command camlctl
+# runs as caml, and ~caml/.profile sources them for interactive sessions. The user types them in
 # (`ssh -t caml-vps camlctl secrets`, input hidden) or fills in a file that
 # the agent uploads and `--import`s; either way no key passes through the
 # agent's chat, and camlctl never prints one. The file is written by the
@@ -824,8 +827,9 @@ mv -f "$tmp" "$f"
 hook="[ -f ~/.caml-secrets ] && . ~/.caml-secrets"
 grep -qxF "$hook" "$1/.profile" 2>/dev/null || printf "%s\n" "$hook" >> "$1/.profile"
 '
-# Runs as caml in a login shell, so it sees what every caml command sees.
-# $1: caml's home, then the names to report. Prints "NAME state", never a value.
+# Runs as caml through as_caml, so it sees exactly what every caml command
+# sees. $1: caml's home, then the names to report. Prints "NAME state",
+# never a value.
 # shellcheck disable=SC2016
 SECRETS_CHECKER='
 home="$1"; shift
@@ -849,7 +853,7 @@ secrets_write() { as_caml "$CAML_HOME" bash -c "$SECRETS_WRITER" camlctl "$CAML_
 secrets_states() {  # NAME state lines for the known names plus any in the file
   local names=() e
   for e in "${SECRETS_KNOWN[@]}"; do names+=("${e%%|*}"); done
-  as_caml "$CAML_HOME" env HOME="$CAML_HOME" bash -lc "$SECRETS_CHECKER" camlctl "$CAML_HOME" "${names[@]}" 2>/dev/null
+  as_caml "$CAML_HOME" bash -c "$SECRETS_CHECKER" camlctl "$CAML_HOME" "${names[@]}"
 }
 
 secret_info() {  # NAME -> "when|where" (empty for names camlctl doesn't know)

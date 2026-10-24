@@ -333,8 +333,8 @@ Both TabPFN variants need a free Prior Labs API key in `TABPFN_TOKEN`:
    ssh -t root@<host> camlctl secrets
    ```
 
-   It writes the keys to `~caml/.caml-secrets` (mode 600), which
-   `~caml/.profile` sources. `camlctl secrets --check` prints `set` or
+   It writes the keys to `~caml/.caml-secrets` (mode 600), which camlctl
+   loads for every command it runs as `caml`. `camlctl secrets --check` prints `set` or
    `missing` for each key, never the key. To use a file instead,
    `camlctl secrets --template` prints one to fill in, and
    `camlctl secrets --import FILE` stores the keys from it and deletes it.

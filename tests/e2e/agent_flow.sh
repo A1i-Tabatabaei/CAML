@@ -75,6 +75,7 @@ expect "version" '^caml [0-9]+\.[0-9]+\.[0-9]+' "$out"
 expect "info after setup" '^caml_user: present$' "$(remote camlctl info --offline)"
 
 step "Check-in 2, keys: a filled-in file (Notepad style), imported unread"
+echo "caml's login files: $(remote "ls -a /home/caml" | grep -E '^\.(profile|bash_profile|bash_login|bashrc)$' | tr '\n' ' ')"
 out="$(remote camlctl secrets --check)"; printf '%s\n' "$out"
 expect "no key yet" '^TABPFN_TOKEN: (missing|set)' "$out"
 remote camlctl secrets --template \

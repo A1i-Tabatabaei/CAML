@@ -55,10 +55,10 @@ Users who'd rather type the key into a file get `caml-secrets.env` from
 `camlctl secrets --template`; the agent uploads it unread and imports it
 with `camlctl secrets --import caml-secrets.env`, which deletes the
 uploaded copy. Either way, the key ends up as `export TABPFN_TOKEN=...` in
-`~caml/.caml-secrets` (mode 600), which `~caml/.profile` sources. That's
-`~/.profile`, not `~/.bashrc`, because camlctl runs commands in a login
-shell, which reads `~/.profile`, and Ubuntu's default `~/.bashrc` returns
-early for non-interactive shells.
+`~caml/.caml-secrets` (mode 600). camlctl loads that file itself for every
+command it runs as `caml`, so jobs and frameworks see the key whichever
+profile files the account has. `~caml/.profile` also sources it, for
+interactive `sudo -iu caml` sessions.
 
 **Check**, without printing the key:
 

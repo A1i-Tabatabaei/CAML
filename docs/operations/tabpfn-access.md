@@ -14,8 +14,10 @@ in this file or any other — not even temporarily.
   or fills in the file from `camlctl secrets --template`, which the agent
   imports unread with `camlctl secrets --import` (it deletes the uploaded
   copy). Either way it lands in `~caml/.caml-secrets` (mode 600, written by
-  the `caml` user itself, sourced from `~caml/.profile`, not `~/.bashrc`,
-  which returns early for the non-interactive login shells camlctl uses).
+  the `caml` user itself). camlctl loads it explicitly on every switch to
+  `caml` (since 1.2.0: relying on `~/.profile` failed on CI, where a login
+  shell read another profile file instead), and `~caml/.profile` sources it
+  for interactive sessions.
   `camlctl secrets --check` says `set` or `missing`, never the value. The
   1.1.0 `camlctl tabpfn-token` still works for this one key. **Both TabPFN frameworks read
   `TABPFN_TOKEN` straight from the process environment** (CAML doesn't parse

@@ -895,6 +895,27 @@ terminal itself. CI's `server-e2e` also runs the prompt for real through
 piped input arrives before echo is off, so it only checks that the key was
 stored, with a script that compares it in `caml`'s login shell.
 
+### The key was stored, but `caml`'s commands didn't see it (CI, first 1.2.0 run)
+
+**Symptom** (CI run 40094344652, `server-e2e`): `camlctl secrets --import`
+reported `TABPFN_TOKEN: imported (14 characters)` and the file existed, but
+the check right after it, and every later one, said `TABPFN_TOKEN: missing`.
+The unit tests passed, because they run camlctl as an ordinary user without
+sudo or a login shell. The 1.1.0 e2e step accepted `token-(set|missing)`,
+so it could never have caught this.
+**Cause**: the design relied on `caml`'s login shell (`bash -lc`, through
+sudo) reading `~/.profile`, where the loader line lives. A bash login shell
+reads only the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile`
+that exists, so any account with a `~/.bash_profile` skips the loader.
+**Fix**: `as_caml` sources `~/.caml-secrets` itself before running anything
+as `caml`, in both branches, and the check runs through `as_caml`. So it
+reports exactly what jobs and frameworks inherit. The `~/.profile` line stays
+for interactive `sudo -iu caml` sessions. A unit test now writes a
+`.bash_profile` with no loader and checks that both `--check` and a
+`camlctl script` still see the key. Removing the explicit loading makes it
+fail (mutation-checked). The e2e step prints which login files `caml` has,
+and checks the typed key's value from inside `caml`'s environment.
+
 ### Probing data without reading it
 
 An agent that runs `head data.csv` sends rows of the user's data to its

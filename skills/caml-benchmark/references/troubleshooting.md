@@ -40,7 +40,7 @@ and the ledger's `detail` field. The repo's
 | `Incorrect benchmark name or path` | A typo in the YAML path | Paths are relative to the repo (`input/datasets/NAME/NAME.yaml`), or absolute |
 | `X is not installed -- run caml install X first` | `caml sweep` checks every framework before it starts | `camlctl install X`, or drop X from the list |
 | `camlctl install` ends with `failed: X` | One framework's dependencies failed to resolve or build | `camlctl install --force X` to retry, and read its error (`camlctl logs install 200`). Network errors are usually transient. |
-| `TABPFN_TOKEN is not set (or is still the placeholder value)` | No key in the job's environment | `camlctl secrets --check`, then the user enters it ([checkpoints.md](checkpoints.md) §2). camlctl's loader is in `~/.profile`, not `~/.bashrc`. |
+| `TABPFN_TOKEN is not set (or is still the placeholder value)` | No key in the job's environment | `camlctl secrets --check`, then the user enters it ([checkpoints.md](checkpoints.md) §2). camlctl loads `~caml/.caml-secrets` itself for every command, so a job started through camlctl has it; a hand-run `sudo -u caml` command may not. |
 | `TabPFNLicenseError` | The TabPFN-3 model license wasn't accepted | The user accepts it on ux.priorlabs.ai (Licenses tab) |
 
 ## Jobs that fail
